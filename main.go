@@ -6,10 +6,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/alexflint/go-arg"
+	"github.com/skubalj/spfa/tui"
 )
 
 type Args struct {
-	Verbose bool `arg:"-v,--verbose" help:"Show additional logging"`
+	Verbose   bool `arg:"-v,--verbose" help:"Show additional logging"`
+	Copyright bool `arg:"-c,--copyright" help:"display GPL copyright notice"`
 }
 
 func (Args) Epilogue() string {
@@ -37,8 +39,12 @@ func main() {
 	var args Args
 	arg.MustParse(&args)
 
-	var initialModel tea.Model
-	p := tea.NewProgram(initialModel)
+	if args.Copyright {
+		fmt.Println(gplCopyrightNotice)
+		return
+	}
+
+	p := tea.NewProgram(tui.InitialModel())
 	_, err := p.Run()
 	if err != nil {
 		fmt.Printf("Error: %v", err)
