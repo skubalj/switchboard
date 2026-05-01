@@ -2,6 +2,7 @@ package portforwarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,12 +15,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type SSHConfig struct {
+type ConnectionConfig struct {
 	User           string // user to authenticate as
 	Auth           AuthMethod
 	Host           string // in the form HOST:PORT
-	LocalForwards  []PortForward
-	RemoteForwards []PortForward
+	LocalForwards  chan PortForward
+	RemoteForwards chan PortForward
 }
 
 // Typed defintiion of a port forward operation
@@ -46,7 +47,7 @@ type PrivateKeyAuth struct {
 }
 
 func (a PrivateKeyAuth) Create() (ssh.AuthMethod, error) {
-	key, err := os.ReadFile("/home/user/.ssh/id_rsa")
+	key, err := os.ReadFile(a.Path)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read private key: %w", err)
 	}
@@ -73,8 +74,7 @@ func (a PrivateKeyAuth) Create() (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(signer), nil
 }
 
-func ConnectToClient(ctx context.Context, msgs messaging.Tx, savedConfig SSHConfig) error {
-	var hostKey ssh.PublicKey
+func ConnectToClient(ctx context.Context, msgs messaging.Tx, savedConfig ConnectionConfig) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -86,7 +86,7 @@ func ConnectToClient(ctx context.Context, msgs messaging.Tx, savedConfig SSHConf
 	config := &ssh.ClientConfig{
 		User:            savedConfig.User,
 		Auth:            []ssh.AuthMethod{authMethod},
-		HostKeyCallback: ssh.FixedHostKey(hostKey),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         60 * time.Second,
 	}
 
@@ -97,16 +97,21 @@ func ConnectToClient(ctx context.Context, msgs messaging.Tx, savedConfig SSHConf
 	}
 	defer client.Close()
 
+	msgs.Infof("Established connection to %s@%s", savedConfig.User, savedConfig.Host)
+	defer msgs.Infof("Closed connection to %s@%s", savedConfig.User, savedConfig.Host)
+
 	eg, ctx := errgroup.WithContext(ctx)
 
-	for _, forwarding := range savedConfig.LocalForwards {
-		eg.Go(func() error { return forwardLocal(ctx, client, forwarding, msgs) })
+	for {
+		select {
+		case <-ctx.Done():
+			return eg.Wait()
+		case forwarding := <-savedConfig.LocalForwards:
+			eg.Go(func() error { return forwardLocal(ctx, client, forwarding, msgs) })
+		case forwarding := <-savedConfig.RemoteForwards:
+			eg.Go(func() error { return forwardRemote(ctx, client, forwarding, msgs) })
+		}
 	}
-	for _, forwarding := range savedConfig.RemoteForwards {
-		eg.Go(func() error { return forwardRemote(ctx, client, forwarding, msgs) })
-	}
-
-	return eg.Wait()
 }
 
 // Connections to the given TCP port on the local (client) host are to be forwarded to the given host and port
@@ -119,6 +124,8 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 		return fmt.Errorf("unable to open listener for local address %s: %w", addresses.LocalAddr, err)
 	}
 
+	msgs.Infof("Now listening on local port %s", addresses.LocalAddr)
+
 	go func() {
 		<-ctx.Done()
 		localListener.Close()
@@ -126,22 +133,28 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 
 	for {
 		localConn, err := localListener.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) {
+			return nil
+		} else if err != nil {
 			return fmt.Errorf("listener closed: %w", err)
 		}
+		msgs.Debugf("New connection to local port %s", addresses.LocalAddr)
 
 		go func() {
 			defer localConn.Close()
+			defer msgs.Debugf("Connection to local port %s closed", addresses.LocalAddr)
 
 			remoteConn, err := client.Dial("tcp", addresses.RemoteAddr.String())
 			if err != nil {
-				msgs.SendError(fmt.Errorf("unable to dial remote address %s: %w", addresses.RemoteAddr, err))
+				msgs.Errorf("unable to dial remote address %s: %w", addresses.RemoteAddr, err)
+				return
 			}
 			defer remoteConn.Close()
 
 			err = copyData(ctx, localConn, remoteConn)
 			if err != nil {
-				msgs.SendError(fmt.Errorf("error copying data: %w", err))
+				msgs.SendError(err)
+				return
 			}
 		}()
 	}
@@ -157,6 +170,8 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 		return fmt.Errorf("unable to open listener for remote address %s: %w", addresses.RemoteAddr, err)
 	}
 
+	msgs.Infof("Now listening on host %s@%s to port %s", client.User(), client.LocalAddr(), addresses.LocalAddr)
+
 	go func() {
 		<-ctx.Done()
 		remoteListener.Close()
@@ -164,22 +179,28 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 
 	for {
 		remoteConn, err := remoteListener.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) {
+			return nil
+		} else if err != nil {
 			return fmt.Errorf("listener closed: %w", err)
 		}
+		msgs.Debugf("New connection to remote port %s", addresses.RemoteAddr)
 
 		go func() {
 			defer remoteConn.Close()
+			defer msgs.Debugf("Connection to remote port %s closed", addresses.RemoteAddr)
 
 			localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr))
 			if err != nil {
-				msgs.SendError(fmt.Errorf("unable to dial local address %s: %w", addresses.LocalAddr, err))
+				msgs.Errorf("unable to dial local address %s: %w", addresses.LocalAddr, err)
+				return
 			}
 			defer localConn.Close()
 
 			err = copyData(ctx, localConn, remoteConn)
 			if err != nil {
-				msgs.SendError(fmt.Errorf("error copying data: %w", err))
+				msgs.SendError(err)
+				return
 			}
 		}()
 	}
@@ -199,19 +220,17 @@ func copyData(ctx context.Context, localConn net.Conn, remoteConn net.Conn) erro
 	}()
 
 	eg.Go(func() error {
-		defer cancel()
 		_, err := io.Copy(localConn, remoteConn)
 		if err != nil {
-			return fmt.Errorf("error copying data to local device: %w", err)
+			return fmt.Errorf("error copying to local device: %w", err)
 		}
 		return nil
 	})
 
 	eg.Go(func() error {
-		defer cancel()
 		_, err := io.Copy(remoteConn, localConn)
 		if err != nil {
-			return fmt.Errorf("error copying data to remote device: %w", err)
+			return fmt.Errorf("error copying to remote device: %w", err)
 		}
 		return nil
 	})

@@ -9,6 +9,7 @@ import (
 )
 
 type Args struct {
+	Verbose bool `arg:"-v,--verbose" help:"Show additional logging"`
 }
 
 func (Args) Epilogue() string {

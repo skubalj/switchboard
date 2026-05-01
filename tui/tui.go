@@ -10,10 +10,10 @@ import (
 type model struct {
 	msgTx   messaging.Tx
 	msgRx   messaging.Rx
-	configs []portforwarding.SSHConfig
+	configs []portforwarding.ConnectionConfig
 }
 
-func initialModel(rows []portforwarding.SSHConfig) tea.Model {
+func initialModel(rows []portforwarding.ConnectionConfig) tea.Model {
 	tx, rx := messaging.NewChannels()
 	return model{
 		msgTx:   tx,
