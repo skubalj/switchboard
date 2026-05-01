@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/alexflint/go-arg"
-	"github.com/skubalj/spfa/tui"
+	"github.com/skubalj/switchboard/tui"
 )
 
 type Args struct {
@@ -19,7 +19,7 @@ func (Args) Epilogue() string {
 Copyright (C) 2026 Joseph Skubal`
 }
 
-const gplCopyrightNotice = `tag-monorepo: Per-module Monorepo Tagging
+const gplCopyrightNotice = `switchboard: SSH Port Forwarding Interface
 Copyright (C) 2026 Joseph Skubal
 
 This program is free software: you can redistribute it and/or modify

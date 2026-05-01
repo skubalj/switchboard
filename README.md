@@ -1,4 +1,4 @@
-# SPFA: SSH Port Forwarding Agent
+# Switchboard: SSH Port Forwarding Interface
 
 SSH is super cool! You can use it to easily yet securely access a remote system,
 but did you know that you can also use it to forward ports between systems?
@@ -17,12 +17,12 @@ systems repeatedly. This can be simplified with shell scripts, but each host
 requires its own process, meaning that you may have to have multiple port
 forwards open at the same time.
 
-SPFA provies a simple TUI that helps you manage which port forwards are
+Switchboard provies a simple TUI that helps you manage which port forwards are
 currently active. It uses a native Go implementation of the SSH protocol, rather
 than using the OpenSSH library. This means that you can leverage Go's excellent
 cross compilation support to create a binary for whatever client you need to
-target. Is your gateway an ARM system running Linux? SPFA has you covered. Is
-your laptop running Windows? SPFA works for that too.
+target. Is your gateway an ARM system running Linux? switchboard has you covered. Is
+your laptop running Windows? Switchboard works for that too.
 
 ## Usage
 

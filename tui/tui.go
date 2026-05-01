@@ -11,9 +11,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/skubalj/spfa/messaging"
-	"github.com/skubalj/spfa/portforwarding"
-	"github.com/skubalj/spfa/ringbuffer"
+	"github.com/skubalj/switchboard/messaging"
+	"github.com/skubalj/switchboard/portforwarding"
+	"github.com/skubalj/switchboard/ringbuffer"
 )
 
 type model struct {
@@ -132,13 +132,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	if m.ctx.Err() != nil {
-		return tea.NewView("Goodbye from SPFA!\n")
+		return tea.NewView("Goodbye from switchboard!\n")
 	}
 
 	// View Setup
 	var v tea.View
 	v.AltScreen = true
-	v.WindowTitle = "SPFA"
+	v.WindowTitle = "switchboard"
 
 	// Content
 	var content strings.Builder

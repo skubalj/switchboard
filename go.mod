@@ -1,4 +1,4 @@
-module github.com/skubalj/spfa
+module github.com/skubalj/switchboard
 
 go 1.26.2
 

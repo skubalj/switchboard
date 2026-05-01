@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/skubalj/spfa/messaging"
+	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 )
