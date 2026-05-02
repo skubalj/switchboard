@@ -3,6 +3,10 @@ package messaging
 import (
 	"context"
 	"fmt"
+	"image/color"
+	"time"
+
+	"charm.land/lipgloss/v2"
 )
 
 func NewChannels() (Tx, Rx) {
@@ -54,12 +58,21 @@ func (rx Rx) NextMessage(ctx context.Context) string {
 	case <-ctx.Done():
 		return ""
 	case err := <-rx.errMessages:
-		return "⛔: " + err.Error()
+		return formatMessage(lipgloss.Red, "ERROR", err.Error())
 	case warn := <-rx.warningMessages:
-		return "⚠️: " + warn
+		return formatMessage(lipgloss.Yellow, "WARN ", warn)
 	case info := <-rx.infoMessages:
-		return "📨: " + info
+		return formatMessage(lipgloss.Green, "INFO ", info)
 	case debug := <-rx.debugMessages:
-		return "🪲: " + debug
+		return formatMessage(lipgloss.Blue, "DEBUG", debug)
 	}
+}
+
+func formatMessage(color color.Color, tag, message string) string {
+	return fmt.Sprintf(
+		" %s [%s]: %s",
+		time.Now().Local().Format(time.DateTime),
+		lipgloss.NewStyle().Foreground(color).Render(tag),
+		message,
+	)
 }

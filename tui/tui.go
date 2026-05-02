@@ -30,26 +30,33 @@ type model struct {
 	keyMap          keyMap
 	help            help.Model
 	logs            ringbuffer.RingBuffer[string]
+	logsExpanded    bool
 	logsViewport    viewport.Model
 	connectionTable table.Model
 }
 
 type keyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Select key.Binding
-	Apply  key.Binding
-	Cancel key.Binding
-	Exit   key.Binding
+	Up            key.Binding
+	Down          key.Binding
+	Select        key.Binding
+	Apply         key.Binding
+	ExpandLogs    key.Binding
+	ForwardLocal  key.Binding
+	ForwardRemote key.Binding
+	Cancel        key.Binding
+	Exit          key.Binding
 }
 
 var DefaultKeyMap = keyMap{
-	Up:     key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
-	Down:   key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
-	Select: key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "Select")),
-	Apply:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Apply")),
-	Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
-	Exit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "Exit")),
+	Up:            key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
+	Down:          key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
+	Select:        key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "Select")),
+	Apply:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Apply")),
+	ExpandLogs:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "Expand Logs")),
+	ForwardLocal:  key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
+	ForwardRemote: key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
+	Cancel:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
+	Exit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "Exit")),
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view. It's part
@@ -59,6 +66,9 @@ func (k keyMap) ShortHelp() []key.Binding {
 		k.Up,
 		k.Down,
 		k.Select,
+		k.ExpandLogs,
+		k.ForwardLocal,
+		k.ForwardRemote,
 		k.Apply,
 		k.Cancel,
 		k.Exit,
@@ -114,15 +124,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ctxCancel()
 			return m, tea.Quit
 		case key.Matches(msg, m.keyMap.Up):
-			m.connectionTable.MoveUp(1)
+			if m.logsExpanded {
+				m.logsViewport.ScrollUp(1)
+			} else {
+				m.connectionTable.MoveUp(1)
+			}
 		case key.Matches(msg, m.keyMap.Down):
-			m.connectionTable.MoveDown(1)
+			if m.logsExpanded {
+				m.logsViewport.ScrollDown(1)
+			} else {
+				m.connectionTable.MoveDown(1)
+			}
+		case key.Matches(msg, m.keyMap.ExpandLogs):
+			m.logsExpanded = !m.logsExpanded
 		}
 
 	case LogMessage:
 		if msg != "" {
 			m.logs = m.logs.Append(string(msg))
-			m.logsViewport.SetContentLines(m.logs.AsSlice())
+			lines := m.logs.AsSlice()
+			m.logsViewport.SetContentLines(lines)
+			if !m.logsExpanded {
+				m.logsViewport.SetYOffset(max(0, len(lines)-m.viewportHeight+2))
+			}
 			return m, m.getLogMessage
 		}
 	}
@@ -140,13 +164,20 @@ func (m model) View() tea.View {
 	v.AltScreen = true
 	v.WindowTitle = "switchboard"
 
+	if m.logsExpanded {
+		v.SetContent(m.showFullLogs())
+		return v
+	}
+
 	// Content
 	var content strings.Builder
+
+	logsFrameHeight := 8
 
 	connectionsFrame := Frame{
 		Title:  "Active Connections",
 		Width:  m.viewportWidth,
-		Height: max(8, len(m.connections)),
+		Height: m.viewportHeight - 1 - logsFrameHeight,
 	}
 
 	m.connectionTable.SetColumns(makeColumns(connectionsFrame.InnerWidth()))
@@ -158,17 +189,34 @@ func (m model) View() tea.View {
 	logsFrame := Frame{
 		Title:  "Logs",
 		Width:  m.viewportWidth,
-		Height: m.viewportHeight - connectionsFrame.Height - 1, // -1 for the footer we haven't written yet
+		Height: logsFrameHeight,
 	}
 
-	m.logsViewport.SetWidth(logsFrame.InnerWidth())
-	m.logsViewport.SetHeight(logsFrame.InnerHeight())
+	var logs strings.Builder
+	logsSlice := m.logs.AsSlice()
+	for _, logEntry := range logsSlice[max(0, len(logsSlice)-logsFrame.InnerHeight()):] {
+		logs.WriteString(logEntry)
+		logs.WriteRune('\n')
+	}
 
-	fmt.Fprintln(&content, logsFrame.Render(m.logsViewport.View()))
+	fmt.Fprintln(&content, logsFrame.Render(strings.Trim(logs.String(), "\n")))
 	fmt.Fprintln(&content, m.help.View(m.keyMap))
 
 	v.SetContent(content.String())
 	return v
+}
+
+func (m model) showFullLogs() string {
+	frame := Frame{
+		Title:  "Logs",
+		Width:  m.viewportWidth,
+		Height: m.viewportHeight,
+	}
+
+	m.logsViewport.SetWidth(frame.InnerWidth())
+	m.logsViewport.SetHeight(frame.InnerHeight())
+
+	return frame.Render(m.logsViewport.View())
 }
 
 func makeColumns(width int) []table.Column {
