@@ -30,7 +30,7 @@ const (
 )
 
 func NewCollectionModal() *ConnectionModal {
-	var input textinput.Model
+	input := textinput.New()
 	input.SetVirtualCursor(true)
 	input.SetWidth(48)
 	input.SetStyles(style.InputBox)
@@ -181,12 +181,13 @@ func (m ConnectionModal) Render() contentBlock {
 }
 
 type PasswordModal struct {
+	ConnectionID   uint32
 	PasswordTarget string
 	Password       textinput.Model
 }
 
-func NewPasswordModal(target string) modal {
-	var input textinput.Model
+func NewPasswordModal(target string, connID uint32) modal {
+	input := textinput.New()
 	input.SetVirtualCursor(true)
 	input.SetWidth(48)
 	input.SetStyles(style.InputBox)
@@ -197,7 +198,10 @@ func NewPasswordModal(target string) modal {
 	return &PasswordModal{PasswordTarget: target, Password: input}
 }
 
-type PasswordMessage string
+type PasswordMessage struct {
+	ConnectionID uint32
+	Password     string
+}
 
 func (m *PasswordModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -208,7 +212,12 @@ func (m *PasswordModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 		case "ctrl+c":
 			return nil, tea.Quit
 		case "enter":
-			return nil, func() tea.Msg { return PasswordMessage(m.Password.Value()) }
+			return nil, func() tea.Msg {
+				return PasswordMessage{
+					ConnectionID: m.ConnectionID,
+					Password:     m.Password.Value(),
+				}
+			}
 		default:
 			var cmd tea.Cmd
 			m.Password, cmd = m.Password.Update(msg)
@@ -258,15 +267,22 @@ func (m *ErrorModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 }
 
 func (m ErrorModal) Render() contentBlock {
+	lines := []string{m.Content}
+	// lines := strings.Split(m.Content, ": ")
+	length := 0
+	for _, line := range lines {
+		length = max(length, len(line))
+	}
+
 	frame := Frame{
 		Title:    m.Title,
-		Width:    len(m.Content) + 4,
-		Height:   3,
+		Width:    length + 4,
+		Height:   len(lines) + 2,
 		PaddingX: 1,
 	}
 
 	return contentBlock{
-		Content: frame.Render(m.Content),
+		Content: frame.Render(strings.Join(lines, "\n")),
 		Width:   frame.Width,
 		Height:  frame.Height,
 	}

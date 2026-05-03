@@ -134,8 +134,3 @@ func newTable() table.Model {
 
 	return connectionTable
 }
-
-type AddConnectionRow struct {
-	ConnectionRow connectionRow
-	Password      string
-}

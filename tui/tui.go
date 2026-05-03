@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -99,7 +100,7 @@ func InitialModel() tea.Model {
 	ctx, cancel := context.WithCancel(context.TODO())
 	tx, rx := messaging.NewChannels()
 
-	return model{
+	return &model{
 		ctx:             ctx,
 		ctxCancel:       cancel,
 		msgTx:           tx,
@@ -124,7 +125,7 @@ func (m model) getLogMessage() tea.Msg {
 	return LogMessage(m.msgRx.NextMessage(m.ctx))
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// If we set a width on the help menu it can gracefully truncate
@@ -182,25 +183,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case connectionRow:
 		m.connections = append(m.connections, msg)
+		m.updateTableRows()
 		target := msg.User + "@" + msg.Host
 		if msg.SSHKey != "" {
 			target = filepath.Base(msg.SSHKey)
 		}
-		m.modalLayer = NewPasswordModal(target)
+		m.modalLayer = NewPasswordModal(target, msg.UID)
 
 	case PasswordMessage:
+		idx := slices.IndexFunc(m.connections, func(c connectionRow) bool { return c.UID == msg.ConnectionID })
+		if idx < 0 {
+			m.modalLayer = NewErrorModal("Error", "got password for unknown connection")
+			return m, nil
+		}
+		row := m.connections[idx]
+		connection := row.MakeConnection(msg.Password)
 		ctx, dropCallback := context.WithCancel(m.ctx)
-		m.connections[len(m.connections)-1].DropConnection = dropCallback
-		row := m.connections[len(m.connections)-1]
-
-		connection := row.MakeConnection(string(msg))
-
 		errCh := make(chan error)
 		err := portforwarding.ConnectToClient(ctx, errCh, m.msgTx, connection)
 		if err != nil {
-			m.modalLayer = NewErrorModal("Connection Error", fmt.Sprintf("unable to connect to host %s@%s: %s", connection.User, connection.Host, err))
+			dropCallback()
+			m.modalLayer = NewErrorModal("Connection Error", err.Error())
 			return m, nil
 		}
+
+		m.connections[idx].DropConnection = dropCallback
+		m.connections[idx].Online = true
+		m.updateTableRows()
 
 		return m, func() tea.Msg {
 			<-errCh
@@ -218,7 +227,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() tea.View {
+func (m *model) updateTableRows() {
+	m.connectionTable.SetRows(tableRows(m.connections))
+}
+
+func (m *model) View() tea.View {
 	if m.ctx.Err() != nil {
 		return tea.NewView("Goodbye from switchboard!\n")
 	}

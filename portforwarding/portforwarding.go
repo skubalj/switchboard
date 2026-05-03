@@ -108,7 +108,7 @@ func ConnectToClient(
 	// Connect to the remote server and perform the SSH handshake.
 	client, err := ssh.Dial("tcp", conn.Host, config)
 	if err != nil {
-		return fmt.Errorf("unable to connect to client %s@%s: %v", conn.User, conn.Host, err)
+		return fmt.Errorf("unable to connect to SSH server %s@%s: %v", conn.User, conn.Host, err)
 	}
 
 	go mainLoop(ctx, errCh, msgs, client, conn)
