@@ -13,19 +13,21 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/ringbuffer"
 	"github.com/skubalj/switchboard/tui/style"
 )
 
-type model struct {
+type Model struct {
 	// Application State
 	ctx         context.Context
 	ctxCancel   func()
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
 	connections []connectionRow
+	Config      config.Config
 
 	// UI State
 	viewportWidth   int
@@ -96,11 +98,11 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	panic("unimplemented")
 }
 
-func InitialModel() tea.Model {
+func InitialModel(verbose bool, cfg config.Config) tea.Model {
 	ctx, cancel := context.WithCancel(context.TODO())
 	tx, rx := messaging.NewChannels()
 
-	return &model{
+	return &Model{
 		ctx:             ctx,
 		ctxCancel:       cancel,
 		msgTx:           tx,
@@ -115,17 +117,18 @@ func InitialModel() tea.Model {
 }
 
 type LogMessage string
+type ConnectionEstablished uint32
 type ConnectionDropped uint32
 
-func (m model) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	return m.getLogMessage
 }
 
-func (m model) getLogMessage() tea.Msg {
+func (m Model) getLogMessage() tea.Msg {
 	return LogMessage(m.msgRx.NextMessage(m.ctx))
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// If we set a width on the help menu it can gracefully truncate
@@ -216,10 +219,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return ConnectionDropped(row.UID)
 		}
 
+	case ConnectionEstablished:
+		for i, row := range m.connections {
+			if row.UID == uint32(msg) {
+				m.connections[i].Online = true
+				break
+			}
+		}
+
 	case ConnectionDropped:
 		for i, row := range m.connections {
 			if row.UID == uint32(msg) {
-				m.connections[i].Online = !row.Online
+				m.connections[i].Online = false
+				break
 			}
 		}
 	}
@@ -227,11 +239,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) updateTableRows() {
+func (m *Model) updateTableRows() {
 	m.connectionTable.SetRows(tableRows(m.connections))
 }
 
-func (m *model) View() tea.View {
+func (m *Model) View() tea.View {
 	if m.ctx.Err() != nil {
 		return tea.NewView("Goodbye from switchboard!\n")
 	}
@@ -264,7 +276,7 @@ func (m *model) View() tea.View {
 	return v
 }
 
-func (m model) showFullLogs() string {
+func (m Model) showFullLogs() string {
 	frame := Frame{
 		Title:    "Logs",
 		Width:    m.viewportWidth,
@@ -278,7 +290,7 @@ func (m model) showFullLogs() string {
 	return frame.Render(m.logsViewport.View())
 }
 
-func (m model) mainContent() string {
+func (m Model) mainContent() string {
 	var content strings.Builder
 
 	logsFrameHeight := 8
