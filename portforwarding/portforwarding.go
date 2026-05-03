@@ -15,18 +15,27 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type ConnectionConfig struct {
+type Connection struct {
 	User           string // user to authenticate as
 	Auth           AuthMethod
 	Host           string // in the form HOST:PORT
-	LocalForwards  chan PortForward
-	RemoteForwards chan PortForward
+	LocalForwards  <-chan PortForward
+	RemoteForwards <-chan PortForward
 }
 
 // Typed defintiion of a port forward operation
 type PortForward struct {
+	Stop       chan struct{}
 	LocalAddr  netip.AddrPort
 	RemoteAddr netip.AddrPort
+}
+
+func (pf PortForward) LocalString() string {
+	return pf.LocalAddr.String() + ":" + pf.RemoteAddr.String()
+}
+
+func (pf PortForward) RemoteString() string {
+	return pf.RemoteAddr.String() + ":" + pf.LocalString()
 }
 
 type AuthMethod interface {
@@ -74,42 +83,66 @@ func (a PrivateKeyAuth) Create() (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(signer), nil
 }
 
-func ConnectToClient(ctx context.Context, msgs messaging.Tx, savedConfig ConnectionConfig) error {
+// Connect to the client and listen for commands on a background thread
+func ConnectToClient(
+	ctx context.Context,
+	errCh chan<- error,
+	msgs messaging.Tx,
+	conn Connection,
+) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	authMethod, err := savedConfig.Auth.Create()
+	authMethod, err := conn.Auth.Create()
 	if err != nil {
 		return fmt.Errorf("unable to generate auth: %w", err)
 	}
 
 	config := &ssh.ClientConfig{
-		User:            savedConfig.User,
+		User:            conn.User,
 		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         60 * time.Second,
 	}
 
 	// Connect to the remote server and perform the SSH handshake.
-	client, err := ssh.Dial("tcp", savedConfig.Host, config)
+	client, err := ssh.Dial("tcp", conn.Host, config)
 	if err != nil {
-		return fmt.Errorf("unable to connect to client %s@%s: %v", savedConfig.User, savedConfig.Host, err)
+		return fmt.Errorf("unable to connect to client %s@%s: %v", conn.User, conn.Host, err)
 	}
+
+	go mainLoop(ctx, errCh, msgs, client, conn)
+	return nil
+}
+
+func mainLoop(
+	ctx context.Context,
+	errCh chan<- error,
+	msgs messaging.Tx,
+	client *ssh.Client,
+	conn Connection,
+) {
 	defer client.Close()
 
-	msgs.Infof("Established connection to %s@%s", savedConfig.User, savedConfig.Host)
-	defer msgs.Infof("Closed connection to %s@%s", savedConfig.User, savedConfig.Host)
+	msgs.Infof("Established connection to %s@%s", conn.User, conn.Host)
+	defer msgs.Infof("Closed connection to %s@%s", conn.User, conn.Host)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return eg.Wait()
-		case forwarding := <-savedConfig.LocalForwards:
-			eg.Go(func() error { return forwardLocal(ctx, client, forwarding, msgs) })
-		case forwarding := <-savedConfig.RemoteForwards:
-			eg.Go(func() error { return forwardRemote(ctx, client, forwarding, msgs) })
+			err := eg.Wait()
+			if err != nil {
+				msgs.Errorf("connection %s@%s broken: %v", conn.User, conn.Host, err)
+			}
+			// Push to the err channel to inform the UI that we disconnected
+			errCh <- err
+			return
+		case forward := <-conn.LocalForwards:
+			eg.Go(func() error { return forwardLocal(ctx, client, forward, msgs) })
+		case forward := <-conn.RemoteForwards:
+			eg.Go(func() error { return forwardRemote(ctx, client, forward, msgs) })
 		}
 	}
 }
@@ -127,7 +160,10 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 	msgs.Infof("Now listening on local port %s", addresses.LocalAddr)
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-addresses.Stop:
+		}
 		localListener.Close()
 	}()
 

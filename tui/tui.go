@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -14,6 +15,7 @@ import (
 	"github.com/skubalj/switchboard/messaging"
 	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/ringbuffer"
+	"github.com/skubalj/switchboard/tui/style"
 )
 
 type model struct {
@@ -22,7 +24,7 @@ type model struct {
 	ctxCancel   func()
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
-	connections []portforwarding.ConnectionConfig
+	connections []connectionRow
 
 	// UI State
 	viewportWidth   int
@@ -33,6 +35,18 @@ type model struct {
 	logsExpanded    bool
 	logsViewport    viewport.Model
 	connectionTable table.Model
+	modalLayer      modal
+}
+
+type modal interface {
+	Update(msg tea.Msg) (modal, tea.Cmd)
+	Render() contentBlock
+}
+
+type contentBlock struct {
+	Content string
+	Width   int
+	Height  int
 }
 
 type keyMap struct {
@@ -52,7 +66,7 @@ var DefaultKeyMap = keyMap{
 	Down:          key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
 	Select:        key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "Select")),
 	Apply:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Apply")),
-	ExpandLogs:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "Expand Logs")),
+	ExpandLogs:    key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
 	ForwardLocal:  key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
 	ForwardRemote: key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
 	Cancel:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
@@ -100,6 +114,7 @@ func InitialModel() tea.Model {
 }
 
 type LogMessage string
+type ConnectionDropped uint32
 
 func (m model) Init() tea.Cmd {
 	return m.getLogMessage
@@ -119,24 +134,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewportHeight = msg.Height
 
 	case tea.KeyPressMsg:
+		if m.modalLayer != nil {
+			var cmd tea.Cmd
+			m.modalLayer, cmd = m.modalLayer.Update(msg)
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, m.keyMap.Exit):
 			m.ctxCancel()
 			return m, tea.Quit
+
 		case key.Matches(msg, m.keyMap.Up):
 			if m.logsExpanded {
 				m.logsViewport.ScrollUp(1)
 			} else {
 				m.connectionTable.MoveUp(1)
 			}
+
 		case key.Matches(msg, m.keyMap.Down):
 			if m.logsExpanded {
 				m.logsViewport.ScrollDown(1)
 			} else {
 				m.connectionTable.MoveDown(1)
 			}
+
+		case key.Matches(msg, m.keyMap.Apply):
+			m.modalLayer = NewCollectionModal()
+
 		case key.Matches(msg, m.keyMap.ExpandLogs):
 			m.logsExpanded = !m.logsExpanded
+
+		case key.Matches(msg, m.keyMap.Cancel):
+			m.logsExpanded = false
 		}
 
 	case LogMessage:
@@ -148,6 +178,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logsViewport.SetYOffset(max(0, len(lines)-m.viewportHeight+2))
 			}
 			return m, m.getLogMessage
+		}
+
+	case connectionRow:
+		m.connections = append(m.connections, msg)
+		target := msg.User + "@" + msg.Host
+		if msg.SSHKey != "" {
+			target = filepath.Base(msg.SSHKey)
+		}
+		m.modalLayer = NewPasswordModal(target)
+
+	case PasswordMessage:
+		ctx, dropCallback := context.WithCancel(m.ctx)
+		m.connections[len(m.connections)-1].DropConnection = dropCallback
+		row := m.connections[len(m.connections)-1]
+
+		connection := row.MakeConnection(string(msg))
+
+		errCh := make(chan error)
+		err := portforwarding.ConnectToClient(ctx, errCh, m.msgTx, connection)
+		if err != nil {
+			m.modalLayer = NewErrorModal("Connection Error", fmt.Sprintf("unable to connect to host %s@%s: %s", connection.User, connection.Host, err))
+			return m, nil
+		}
+
+		return m, func() tea.Msg {
+			<-errCh
+			return ConnectionDropped(row.UID)
+		}
+
+	case ConnectionDropped:
+		for i, row := range m.connections {
+			if row.UID == uint32(msg) {
+				m.connections[i].Online = !row.Online
+			}
 		}
 	}
 
@@ -170,6 +234,38 @@ func (m model) View() tea.View {
 	}
 
 	// Content
+	content := m.mainContent()
+	if m.modalLayer != nil {
+		modal := m.modalLayer.Render()
+
+		content = lipgloss.NewCompositor(
+			lipgloss.NewLayer(content),
+			lipgloss.NewLayer(modal.Content).
+				X(m.viewportWidth/2-modal.Width/2).
+				Y(m.viewportHeight/2-modal.Height/2).
+				Z(1),
+		).Render()
+	}
+
+	v.SetContent(content)
+	return v
+}
+
+func (m model) showFullLogs() string {
+	frame := Frame{
+		Title:    "Logs",
+		Width:    m.viewportWidth,
+		Height:   m.viewportHeight,
+		PaddingX: 1,
+	}
+
+	m.logsViewport.SetWidth(frame.InnerWidth())
+	m.logsViewport.SetHeight(frame.InnerHeight())
+
+	return frame.Render(m.logsViewport.View())
+}
+
+func (m model) mainContent() string {
 	var content strings.Builder
 
 	logsFrameHeight := 8
@@ -187,9 +283,10 @@ func (m model) View() tea.View {
 	fmt.Fprintln(&content, connectionsFrame.Render(m.connectionTable.View()))
 
 	logsFrame := Frame{
-		Title:  "Logs",
-		Width:  m.viewportWidth,
-		Height: logsFrameHeight,
+		Title:    "Logs",
+		Width:    m.viewportWidth,
+		Height:   logsFrameHeight,
+		PaddingX: 1,
 	}
 
 	var logs strings.Builder
@@ -202,120 +299,31 @@ func (m model) View() tea.View {
 	fmt.Fprintln(&content, logsFrame.Render(strings.Trim(logs.String(), "\n")))
 	fmt.Fprintln(&content, m.help.View(m.keyMap))
 
-	v.SetContent(content.String())
-	return v
-}
-
-func (m model) showFullLogs() string {
-	frame := Frame{
-		Title:  "Logs",
-		Width:  m.viewportWidth,
-		Height: m.viewportHeight,
-	}
-
-	m.logsViewport.SetWidth(frame.InnerWidth())
-	m.logsViewport.SetHeight(frame.InnerHeight())
-
-	return frame.Render(m.logsViewport.View())
-}
-
-func makeColumns(width int) []table.Column {
-	width -= 6
-	dividedWidth := width / 4
-	remainder := width % dividedWidth
-
-	return []table.Column{
-		{Title: "", Width: 3},
-		{Title: "Connection", Width: dividedWidth + remainder - 1},
-		{Title: "SSH Key", Width: dividedWidth - 2},
-		{Title: "Local Ports", Width: dividedWidth - 2},
-		{Title: "Remote Ports", Width: dividedWidth - 2},
-	}
-}
-
-func tableRows(cons []portforwarding.ConnectionConfig) []table.Row {
-	rows := make([]table.Row, 0, len(cons))
-	rows = append(rows, table.Row{
-		fmt.Sprintf("%3d", 1),
-		"user@hostname",
-		"",
-		"localPorts",
-		"remotePorts",
-	})
-	rows = append(rows, table.Row{
-		fmt.Sprintf("%3d", 2),
-		"user@192.168.0.1:2222",
-		"",
-		"localPorts",
-		"remotePorts",
-	})
-	for idx, connection := range cons {
-		rows = append(rows, table.Row{
-			fmt.Sprintf("%3d", idx+1),
-			connection.User + "@" + connection.Host,
-			"",
-			"localPorts",
-			"remotePorts",
-		})
-	}
-
-	rows = append(rows, table.Row{
-		"  +",
-		"New Connection",
-		"",
-		"",
-		"",
-	})
-
-	return rows
-}
-
-func newTable() table.Model {
-	connectionTable := table.New(
-		table.WithColumns(makeColumns(100)),
-		table.WithRows(tableRows(nil)),
-		table.WithFocused(false),
-		table.WithWidth(100),
-	)
-
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.BrightBlue).
-		BorderBottom(true).
-		Bold(true)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Black).
-		Background(lipgloss.BrightBlue).
-		Bold(false)
-	connectionTable.SetStyles(s)
-
-	return connectionTable
+	return content.String()
 }
 
 type Frame struct {
-	Title  string
-	Width  int
-	Height int
+	Title    string
+	Width    int
+	Height   int
+	PaddingX int
+	PaddingY int
 }
 
 func (f Frame) InnerWidth() int {
-	return f.Width - 2
+	return f.Width - 2 - (2 * f.PaddingX)
 }
 
 func (f Frame) InnerHeight() int {
-	return f.Height - 2
+	return f.Height - 2 - (2 * f.PaddingY)
 }
 
 func (f Frame) Render(content string) string {
-	titleContent := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.BrightBlue).
-		Padding(0, 2).
-		Render(f.Title)
+	titleContent := style.Header.Padding(0, 1).Render(f.Title)
 
 	sizedContent := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder(), true).
+		Padding(f.PaddingY, f.PaddingX).
 		Render(lipgloss.Place(f.InnerWidth(), f.InnerHeight(), lipgloss.Top, lipgloss.Left, content))
 
 	return lipgloss.NewCompositor(
