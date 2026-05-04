@@ -2,11 +2,15 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
+	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/tui/style"
 )
@@ -17,6 +21,7 @@ type connectionRow struct {
 	Online            bool
 	User              string
 	Host              string
+	Port              uint16
 	SSHKey            string
 	LocalForwards     []portforwarding.PortForward
 	NewLocalForwards  chan portforwarding.PortForward
@@ -28,17 +33,54 @@ type connectionRow struct {
 var rowIdx = new(atomic.Uint32)
 
 // Initialize a new connection row
-func NewConnectionRow(user, host, sshkey string) connectionRow {
+func NewConnectionRow(user string, host string, port uint16, sshkey string) connectionRow {
 	return connectionRow{
 		UID:               rowIdx.Add(1),
 		User:              user,
 		Host:              host,
+		Port:              port,
 		SSHKey:            sshkey,
 		LocalForwards:     nil,
 		NewLocalForwards:  make(chan portforwarding.PortForward),
 		RemoteForwards:    nil,
 		NewRemoteForwards: make(chan portforwarding.PortForward),
 	}
+}
+
+func connectionRowFromConfig(conn config.Connection) connectionRow {
+	localForwards := make([]portforwarding.PortForward, 0, len(conn.LocalForwards))
+	for _, f := range conn.LocalForwards {
+		localForwards = append(localForwards, portforwarding.NewPortForwardFromConfig(f))
+	}
+
+	remoteForwards := make([]portforwarding.PortForward, 0, len(conn.RemoteForwards))
+	for _, f := range conn.LocalForwards {
+		remoteForwards = append(remoteForwards, portforwarding.NewPortForwardFromConfig(f))
+	}
+
+	return NewConnectionRow(conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile).
+		WithLocalForwards(localForwards).
+		WithRemoteForwards(remoteForwards)
+}
+
+func (row connectionRow) WithLocalForwards(forwards []portforwarding.PortForward) connectionRow {
+	row.LocalForwards = forwards
+	go func() {
+		for _, forward := range forwards {
+			row.NewLocalForwards <- forward
+		}
+	}()
+	return row
+}
+
+func (row connectionRow) WithRemoteForwards(forwards []portforwarding.PortForward) connectionRow {
+	row.RemoteForwards = forwards
+	go func() {
+		for _, forward := range forwards {
+			row.NewRemoteForwards <- forward
+		}
+	}()
+	return row
 }
 
 func (row connectionRow) AsTableRow() table.Row {
@@ -59,7 +101,7 @@ func (row connectionRow) AsTableRow() table.Row {
 
 	return table.Row{
 		status,
-		row.User + "@" + row.Host,
+		fmt.Sprintf("%s@%s:%d  %d", row.User, row.Host, row.Port, row.UID),
 		row.SSHKey,
 		strings.Join(localForwards, "  "),
 		strings.Join(remoteForwards, "  "),
@@ -72,7 +114,7 @@ func (row connectionRow) MakeConnection(password string) portforwarding.Connecti
 	if row.SSHKey == "" {
 		auth = portforwarding.PasswordAuth{Password: password}
 	} else {
-		auth = portforwarding.PrivateKeyAuth{Path: row.SSHKey, Password: password}
+		auth = portforwarding.PrivateKeyAuth{Path: resolveUserDir(row.SSHKey), Password: password}
 	}
 
 	return portforwarding.Connection{
@@ -82,6 +124,20 @@ func (row connectionRow) MakeConnection(password string) portforwarding.Connecti
 		LocalForwards:  row.NewLocalForwards,
 		RemoteForwards: row.NewRemoteForwards,
 	}
+}
+
+func resolveUserDir(path string) string {
+	suffix, found := strings.CutPrefix(path, "~")
+	if !found {
+		return path
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+
+	return filepath.Join(home, suffix)
 }
 
 func makeColumns(width int) []table.Column {

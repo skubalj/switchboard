@@ -106,9 +106,12 @@ func (cfg Config) FetchSSHConfig(host string) (Host, error) {
 	if err != nil {
 		return Host{}, fmt.Errorf("unable to get port: %w", err)
 	}
-	port, err := strconv.ParseUint(portStr, 10, 16)
-	if err != nil {
-		return Host{}, fmt.Errorf("unable to parse port: %w", err)
+	var port uint64 = 22
+	if portStr != "" {
+		port, err = strconv.ParseUint(portStr, 10, 16)
+		if err != nil {
+			return Host{}, fmt.Errorf("unable to parse port: %w", err)
+		}
 	}
 
 	identityFile, err := sshCfg.Get(host, "identityfile")

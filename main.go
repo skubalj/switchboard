@@ -17,7 +17,7 @@ type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`
 	SetConfig *setConfigSubcommand `arg:"subcommand:set-config" help:"set values in the config file"`
 
-	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard]"`
+	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.yaml]"`
 	Verbose    bool   `arg:"-v,--verbose" help:"Show additional logging"`
 	Copyright  bool   `arg:"-c,--copyright" help:"display GPL copyright notice"`
 }
@@ -90,7 +90,7 @@ func main() {
 			fmt.Println("You can manually configure the switchboard config file with '--config-file'")
 			os.Exit(1)
 		}
-		configFilePath = filepath.Join(home, ".ssh", "switchboard")
+		configFilePath = filepath.Join(home, ".ssh", "switchboard.yaml")
 	}
 
 	var err error
@@ -128,6 +128,6 @@ func mainCommand(verbose bool, configFilePath string) error {
 		return err
 	}
 
-	cfg = model.(*tui.Model).Config
+	cfg.Connections = model.(*tui.Model).GetConfigConnections()
 	return config.SaveConfig(configFilePath, cfg)
 }

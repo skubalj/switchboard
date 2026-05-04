@@ -3,19 +3,24 @@ package tui
 import (
 	"cmp"
 	"os/user"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/tui/style"
 )
 
 type ConnectionModal struct {
-	modalTitle string
-	user       textinput.Model
-	host       textinput.Model
-	sshKey     textinput.Model
-	selected   ConnectionModalField
+	configLookup func(string) (config.Host, error)
+	modalTitle   string
+	user         textinput.Model
+	host         textinput.Model
+	port         textinput.Model
+	sshKey       textinput.Model
+	errString    string
+	selected     ConnectionModalField
 }
 
 type ConnectionModalField int
@@ -23,23 +28,27 @@ type ConnectionModalField int
 const (
 	userField ConnectionModalField = iota
 	hostField
+	portField
 	sshKeyField
-	connectButtonField
+	loadButtonField
+	saveButtonField
 	cancelButtonField
 	numFields
 )
 
-func NewCollectionModal() *ConnectionModal {
+func NewCollectionModal(configLookup func(string) (config.Host, error)) *ConnectionModal {
 	input := textinput.New()
 	input.SetVirtualCursor(true)
 	input.SetWidth(48)
 	input.SetStyles(style.InputBox)
 
 	modal := ConnectionModal{
-		modalTitle: "New Connection",
-		user:       input,
-		host:       input,
-		sshKey:     input,
+		configLookup: configLookup,
+		modalTitle:   "New Connection",
+		user:         input,
+		host:         input,
+		port:         input,
+		sshKey:       input,
 	}
 
 	osUser, err := user.Current()
@@ -48,8 +57,10 @@ func NewCollectionModal() *ConnectionModal {
 	}
 	modal.user.Prompt = "User: "
 
-	modal.host.Placeholder = "hostname:22"
 	modal.host.Prompt = "Host: "
+
+	modal.port.Prompt = "Port: "
+	modal.port.Placeholder = "22"
 
 	modal.sshKey.Prompt = "SSH Key: "
 
@@ -57,11 +68,12 @@ func NewCollectionModal() *ConnectionModal {
 	return &modal
 }
 
-func EditCollectionModal(row connectionRow) modal {
-	modal := NewCollectionModal()
+func EditCollectionModal(row connectionRow, configLookup func(string) (config.Host, error)) modal {
+	modal := NewCollectionModal(configLookup)
 	modal.modalTitle = "Edit Connection"
 	modal.user.SetValue(row.User)
 	modal.host.SetValue(row.Host)
+	modal.port.SetValue(strconv.FormatUint(uint64(row.Port), 10))
 	modal.sshKey.SetValue(row.SSHKey)
 
 	return modal
@@ -76,6 +88,8 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 	cmdArray = append(cmdArray, cmd)
 	m.host, cmd = m.host.Update(msg)
 	cmdArray = append(cmdArray, cmd)
+	m.port, cmd = m.port.Update(msg)
+	cmdArray = append(cmdArray, cmd)
 	m.sshKey, cmd = m.sshKey.Update(msg)
 	cmdArray = append(cmdArray, cmd)
 
@@ -87,10 +101,16 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 		case "ctrl+c":
 			return nil, tea.Quit
 		case "up":
-			m.selected = max(0, m.selected-1)
+			if m.selected >= loadButtonField {
+				m.selected = sshKeyField
+			} else {
+				m.selected--
+			}
 			cmdArray = append(cmdArray, m.SetFocus())
 		case "down":
-			m.selected = min(numFields-2, m.selected+1)
+			if m.selected < loadButtonField {
+				m.selected++
+			}
 			cmdArray = append(cmdArray, m.SetFocus())
 		case "shift+tab":
 			m.selected = max(0, m.selected-1)
@@ -101,24 +121,39 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 
 		case "enter":
 			switch m.selected {
-			case connectButtonField:
-				return nil, func() tea.Msg {
-					return NewConnectionRow(
-						cmp.Or(m.user.Value(), m.user.Placeholder),
-						m.host.Value(),
-						m.sshKey.Value(),
-					)
+			case saveButtonField:
+				port, err := strconv.ParseUint(m.port.Value(), 10, 16)
+				if err == nil {
+					return nil, func() tea.Msg {
+						return NewConnectionRow(
+							cmp.Or(m.user.Value(), m.user.Placeholder),
+							m.host.Value(),
+							uint16(port),
+							m.sshKey.Value(),
+						)
+					}
+				} else {
+					return NewErrorModal("Error", "port must be a number"), nil
 				}
 			case cancelButtonField:
 				return nil, nil
+			case loadButtonField:
+				m.setFromConfig()
+				return m, nil
 			}
 		case "right":
-			if m.selected == connectButtonField {
+			switch m.selected {
+			case loadButtonField:
+				m.selected = saveButtonField
+			case saveButtonField:
 				m.selected = cancelButtonField
 			}
 		case "left":
-			if m.selected == cancelButtonField {
-				m.selected = connectButtonField
+			switch m.selected {
+			case saveButtonField:
+				m.selected = loadButtonField
+			case cancelButtonField:
+				m.selected = saveButtonField
 			}
 		}
 	}
@@ -126,9 +161,23 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 	return m, tea.Batch(cmdArray...)
 }
 
+func (m *ConnectionModal) setFromConfig() {
+	host, err := m.configLookup(m.host.Value())
+	if err != nil {
+		m.errString = err.Error()
+		return
+	}
+
+	m.user.SetValue(host.User)
+	m.host.SetValue(host.Host)
+	m.port.SetValue(strconv.FormatUint(uint64(host.Port), 10))
+	m.sshKey.SetValue(host.IdentityFile)
+}
+
 func (m *ConnectionModal) SetFocus() tea.Cmd {
 	m.user.Blur()
 	m.host.Blur()
+	m.port.Blur()
 	m.sshKey.Blur()
 
 	switch m.selected {
@@ -136,6 +185,8 @@ func (m *ConnectionModal) SetFocus() tea.Cmd {
 		return m.user.Focus()
 	case hostField:
 		return m.host.Focus()
+	case portField:
+		return m.port.Focus()
 	case sshKeyField:
 		return m.sshKey.Focus()
 	default:
@@ -143,18 +194,28 @@ func (m *ConnectionModal) SetFocus() tea.Cmd {
 	}
 }
 
-func (m ConnectionModal) Render() contentBlock {
+func (m *ConnectionModal) Render() contentBlock {
 	var buf strings.Builder
 	buf.WriteString(m.user.View())
 	buf.WriteRune('\n')
 	buf.WriteString(m.host.View())
 	buf.WriteRune('\n')
+	buf.WriteString(m.port.View())
+	buf.WriteRune('\n')
 	buf.WriteString(m.sshKey.View())
 	buf.WriteRune('\n')
+	buf.WriteString(style.ErrString.Render(m.errString))
 	buf.WriteRune('\n')
 
-	connectBtn := "<Connect>"
-	if m.selected == connectButtonField {
+	loadBtn := "<Load From Config>"
+	if m.selected == loadButtonField {
+		loadBtn = style.ButtonSelected.Render(loadBtn)
+	}
+	buf.WriteString(loadBtn)
+	buf.WriteString(" ")
+
+	connectBtn := "<Save>"
+	if m.selected == saveButtonField {
 		connectBtn = style.ButtonSelected.Render(connectBtn)
 	}
 	buf.WriteString(connectBtn)
@@ -169,7 +230,7 @@ func (m ConnectionModal) Render() contentBlock {
 	frame := Frame{
 		Title:    m.modalTitle,
 		Width:    54,
-		Height:   7,
+		Height:   8,
 		PaddingX: 1,
 	}
 
@@ -195,7 +256,7 @@ func NewPasswordModal(target string, connID uint32) modal {
 	input.EchoMode = textinput.EchoPassword
 	input.EchoCharacter = '*'
 
-	return &PasswordModal{PasswordTarget: target, Password: input}
+	return &PasswordModal{ConnectionID: connID, PasswordTarget: target, Password: input}
 }
 
 type PasswordMessage struct {

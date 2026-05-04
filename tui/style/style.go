@@ -8,8 +8,9 @@ import (
 
 var (
 	Header         = lipgloss.NewStyle().Foreground(lipgloss.BrightBlue).Bold(true)
-	ButtonSelected = lipgloss.NewStyle().Background(lipgloss.BrightBlue)
+	ButtonSelected = lipgloss.NewStyle().Foreground(lipgloss.Black).Background(lipgloss.BrightBlue)
 	InputBox       = makeInputBoxStyle()
+	ErrString      = lipgloss.NewStyle().Foreground(lipgloss.Red)
 )
 
 func makeInputBoxStyle() textinput.Styles {

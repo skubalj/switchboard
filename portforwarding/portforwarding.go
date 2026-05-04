@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,14 @@ type PortForward struct {
 	Stop       chan struct{}
 	LocalAddr  netip.AddrPort
 	RemoteAddr netip.AddrPort
+}
+
+func NewPortForwardFromConfig(f config.PortForward) PortForward {
+	return PortForward{
+		Stop:       make(chan struct{}),
+		LocalAddr:  f.LocalAddr,
+		RemoteAddr: f.RemoteAddr,
+	}
 }
 
 func (pf PortForward) LocalString() string {

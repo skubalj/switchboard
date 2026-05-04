@@ -27,7 +27,7 @@ type Model struct {
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
 	connections []connectionRow
-	Config      config.Config
+	config      config.Config
 
 	// UI State
 	viewportWidth   int
@@ -102,18 +102,27 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 	ctx, cancel := context.WithCancel(context.TODO())
 	tx, rx := messaging.NewChannels()
 
-	return &Model{
+	connections := make([]connectionRow, 0, len(cfg.Connections))
+	for _, conn := range cfg.Connections {
+		connections = append(connections, connectionRowFromConfig(conn))
+	}
+
+	modal := &Model{
 		ctx:             ctx,
 		ctxCancel:       cancel,
 		msgTx:           tx,
 		msgRx:           rx,
-		connections:     nil,
+		connections:     connections,
+		config:          cfg,
 		keyMap:          DefaultKeyMap,
 		help:            help.New(),
 		logs:            ringbuffer.New[string](100),
 		logsViewport:    viewport.New(),
 		connectionTable: newTable(),
 	}
+	modal.updateTableRows()
+
+	return modal
 }
 
 type LogMessage string
@@ -126,6 +135,32 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) getLogMessage() tea.Msg {
 	return LogMessage(m.msgRx.NextMessage(m.ctx))
+}
+
+func (m Model) GetConfigConnections() []config.Connection {
+	conns := make([]config.Connection, 0, len(m.connections))
+	for _, conn := range m.connections {
+		lfs := make([]config.PortForward, 0, len(conn.LocalForwards))
+		for _, fw := range conn.LocalForwards {
+			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
+		}
+		rfs := make([]config.PortForward, 0, len(conn.RemoteForwards))
+		for _, fw := range conn.RemoteForwards {
+			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
+		}
+		conns = append(conns, config.Connection{
+			Host: config.Host{
+				User:         conn.User,
+				Host:         conn.Host,
+				Port:         conn.Port,
+				IdentityFile: conn.SSHKey,
+			},
+			LocalForwards:  lfs,
+			RemoteForwards: rfs,
+		})
+	}
+
+	return conns
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -164,7 +199,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.Apply):
-			m.modalLayer = NewCollectionModal()
+			selectedRow := m.connectionTable.SelectedRow()
+			selectedIdx := m.connectionTable.Cursor()
+			switch selectedRow[0] {
+			case "+":
+				m.modalLayer = NewCollectionModal(m.config.FetchSSHConfig)
+			case "✅":
+				m.connections[selectedIdx].DropConnection()
+			default:
+				selectedConnection := m.connections[selectedIdx]
+				target := selectedRow[1]
+				if selectedConnection.SSHKey != "" {
+					target = filepath.Base(selectedConnection.SSHKey)
+				}
+				m.modalLayer = NewPasswordModal(target, selectedConnection.UID)
+			}
 
 		case key.Matches(msg, m.keyMap.ExpandLogs):
 			m.logsExpanded = !m.logsExpanded
@@ -187,11 +236,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectionRow:
 		m.connections = append(m.connections, msg)
 		m.updateTableRows()
-		target := msg.User + "@" + msg.Host
-		if msg.SSHKey != "" {
-			target = filepath.Base(msg.SSHKey)
-		}
-		m.modalLayer = NewPasswordModal(target, msg.UID)
 
 	case PasswordMessage:
 		idx := slices.IndexFunc(m.connections, func(c connectionRow) bool { return c.UID == msg.ConnectionID })
@@ -223,7 +267,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, row := range m.connections {
 			if row.UID == uint32(msg) {
 				m.connections[i].Online = true
-				break
+				m.updateTableRows()
+				return m, nil
 			}
 		}
 
@@ -231,7 +276,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, row := range m.connections {
 			if row.UID == uint32(msg) {
 				m.connections[i].Online = false
-				break
+				m.updateTableRows()
+				return m, nil
 			}
 		}
 	}
