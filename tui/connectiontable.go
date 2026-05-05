@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -120,7 +121,7 @@ func (row connectionRow) MakeConnection(password string) portforwarding.Connecti
 	return portforwarding.Connection{
 		User:           row.User,
 		Auth:           auth,
-		Host:           row.Host,
+		Host:           row.Host + ":" + strconv.FormatUint(uint64(row.Port), 10),
 		LocalForwards:  row.NewLocalForwards,
 		RemoteForwards: row.NewRemoteForwards,
 	}

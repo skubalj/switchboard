@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/kevinburke/ssh_config"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 func GetConfig(path string) (Config, error) {

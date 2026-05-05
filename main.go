@@ -10,7 +10,7 @@ import (
 	"github.com/alexflint/go-arg"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/tui"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 type Args struct {
