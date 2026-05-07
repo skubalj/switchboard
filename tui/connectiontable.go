@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"charm.land/bubbles/v2/table"
-	"charm.land/lipgloss/v2"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/tui/style"
@@ -67,7 +66,7 @@ func connectionRowFromConfig(ctx context.Context, conn config.Connection) connec
 
 	connectionRow.RemoteForwards = make([]PortForward, 0, len(conn.RemoteForwards))
 	remoteForwards := make([]portforwarding.PortForward, 0, len(conn.RemoteForwards))
-	for _, f := range conn.LocalForwards {
+	for _, f := range conn.RemoteForwards {
 		pfRow, pf := NewPortForwardFromConfig(ctx, f)
 		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pfRow)
 		remoteForwards = append(remoteForwards, pf)
@@ -100,7 +99,7 @@ func (row connectionRow) AsTableRow() table.Row {
 
 	return table.Row{
 		status,
-		fmt.Sprintf("%s@%s:%d  %d", row.User, row.Host, row.Port, row.UID),
+		fmt.Sprintf("%s@%s:%d", row.User, row.Host, row.Port),
 		row.SSHKey,
 		strings.Join(localForwards, "  "),
 		strings.Join(remoteForwards, "  "),
@@ -154,7 +153,7 @@ func makeColumns(width int) []table.Column {
 }
 
 func tableRows(cons []connectionRow) []table.Row {
-	rows := make([]table.Row, 0, len(cons) + 1)
+	rows := make([]table.Row, 0, len(cons)+1)
 	for _, connection := range cons {
 		rows = append(rows, connection.AsTableRow())
 	}
@@ -177,15 +176,7 @@ func newTable() table.Model {
 		table.WithFocused(false),
 		table.WithWidth(100),
 	)
-
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.BrightBlue).
-		BorderBottom(true).
-		Bold(true)
-	s.Selected = s.Selected.Inherit(style.ButtonSelected)
-	connectionTable.SetStyles(s)
+	connectionTable.SetStyles(style.Table)
 
 	return connectionTable
 }

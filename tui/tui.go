@@ -128,6 +128,10 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 type LogMessage string
 type ConnectionEstablished uint32
 type ConnectionDropped uint32
+type NewLocalForward config.PortForward
+type DeleteLocalForward int
+type NewRemoteForward config.PortForward
+type DeleteRemoteForward int
 
 func (m Model) Init() tea.Cmd {
 	return m.getLogMessage
@@ -215,6 +219,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modalLayer = NewPasswordModal(target, selectedConnection.UID)
 			}
 
+		case key.Matches(msg, m.keyMap.ForwardLocal):
+			selectedIdx := m.connectionTable.Cursor()
+			if selectedIdx < len(m.connections) {
+				m.modalLayer = NewLocalForwardingModal(m.connections[selectedIdx].LocalForwards)
+			}
+
+		case key.Matches(msg, m.keyMap.ForwardRemote):
+			selectedIdx := m.connectionTable.Cursor()
+			if selectedIdx < len(m.connections) {
+				m.modalLayer = NewRemoteForwardingModal(m.connections[selectedIdx].RemoteForwards)
+			}
+
 		case key.Matches(msg, m.keyMap.ExpandLogs):
 			m.logsExpanded = !m.logsExpanded
 
@@ -280,6 +296,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+
+	case NewLocalForward:
+	case DeleteLocalForward:
+	case NewRemoteForward:
+	case DeleteRemoteForward:
 	}
 
 	return m, nil

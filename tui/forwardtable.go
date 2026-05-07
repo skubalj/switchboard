@@ -8,12 +8,19 @@ import (
 	"charm.land/bubbles/v2/table"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/portforwarding"
+	"github.com/skubalj/switchboard/tui/style"
 )
 
 type PortForward struct {
 	stopCallback context.CancelFunc
 	LocalAddr    netip.AddrPort
 	RemoteAddr   netip.AddrPort
+}
+
+type ForwardPair struct {
+	IsLocal bool
+	Tx      PortForward
+	Rx      portforwarding.PortForward
 }
 
 func NewPortForwardFromConfig(ctx context.Context, f config.PortForward) (PortForward, portforwarding.PortForward) {
@@ -39,23 +46,25 @@ func (pf PortForward) RemoteString() string {
 }
 
 func newLocalForwardingTable(forwards []PortForward) table.Model {
-	return table.New(
-		table.WithColumns(makeLocalForwardingColumns(100)),
+	tbl := table.New(
+		table.WithColumns(makeLocalForwardingColumns(80)),
 		table.WithRows(makeLocalForwardingRows(forwards)),
 		table.WithFocused(false),
-		table.WithWidth(100),
 	)
+	tbl.SetStyles(style.Table)
+	return tbl
 }
 
 func makeLocalForwardingColumns(width int) []table.Column {
+	width -= 8
 	dividedWidth := width / 4
 	remainder := width % dividedWidth
 
 	return []table.Column{
-		{Title: "Local Bind Address", Width: dividedWidth},
+		{Title: "Local Bind Address", Width: dividedWidth + remainder},
 		{Title: "Local Bind Port", Width: dividedWidth},
 		{Title: "Remote Address", Width: dividedWidth},
-		{Title: "Remote Port", Width: dividedWidth + remainder},
+		{Title: "Remote Port", Width: dividedWidth},
 	}
 }
 
@@ -81,23 +90,26 @@ func makeLocalForwardingRows(forwards []PortForward) []table.Row {
 }
 
 func newRemoteForwardingTable(forwards []PortForward) table.Model {
-	return table.New(
+	tbl := table.New(
 		table.WithColumns(makeLocalForwardingColumns(100)),
 		table.WithRows(makeLocalForwardingRows(forwards)),
 		table.WithFocused(false),
-		table.WithWidth(100),
 	)
+	tbl.SetStyles(style.Table)
+
+	return tbl
 }
 
 func makeRemoteForwardingColumns(width int) []table.Column {
+	width -= 8
 	dividedWidth := width / 4
 	remainder := width % dividedWidth
 
 	return []table.Column{
-		{Title: "Remote Bind Address", Width: dividedWidth},
+		{Title: "Remote Bind Address", Width: dividedWidth + remainder},
 		{Title: "Remote Bind Port", Width: dividedWidth},
 		{Title: "Local Address", Width: dividedWidth},
-		{Title: "Local Port", Width: dividedWidth + remainder},
+		{Title: "Local Port", Width: dividedWidth},
 	}
 }
 
