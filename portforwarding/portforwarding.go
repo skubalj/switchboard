@@ -10,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
@@ -26,25 +25,9 @@ type Connection struct {
 
 // Typed defintiion of a port forward operation
 type PortForward struct {
-	Stop       chan struct{}
+	Ctx        context.Context
 	LocalAddr  netip.AddrPort
 	RemoteAddr netip.AddrPort
-}
-
-func NewPortForwardFromConfig(f config.PortForward) PortForward {
-	return PortForward{
-		Stop:       make(chan struct{}),
-		LocalAddr:  f.LocalAddr,
-		RemoteAddr: f.RemoteAddr,
-	}
-}
-
-func (pf PortForward) LocalString() string {
-	return pf.LocalAddr.String() + ":" + pf.RemoteAddr.String()
-}
-
-func (pf PortForward) RemoteString() string {
-	return pf.RemoteAddr.String() + ":" + pf.LocalString()
 }
 
 type AuthMethod interface {
@@ -171,7 +154,7 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 	go func() {
 		select {
 		case <-ctx.Done():
-		case <-addresses.Stop:
+		case <-addresses.Ctx.Done():
 		}
 		localListener.Close()
 	}()

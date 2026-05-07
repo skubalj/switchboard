@@ -24,9 +24,9 @@ type connectionRow struct {
 	Host              string
 	Port              uint16
 	SSHKey            string
-	LocalForwards     []portforwarding.PortForward
+	LocalForwards     []PortForward
 	NewLocalForwards  chan portforwarding.PortForward
-	RemoteForwards    []portforwarding.PortForward
+	RemoteForwards    []PortForward
 	NewRemoteForwards chan portforwarding.PortForward
 	DropConnection    context.CancelFunc // Signal that the connection should be dropped
 }
@@ -48,40 +48,38 @@ func NewConnectionRow(user string, host string, port uint16, sshkey string) conn
 	}
 }
 
-func connectionRowFromConfig(conn config.Connection) connectionRow {
+func connectionRowFromConfig(ctx context.Context, conn config.Connection) connectionRow {
+	connectionRow := NewConnectionRow(conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile)
+
+	connectionRow.LocalForwards = make([]PortForward, 0, len(conn.LocalForwards))
 	localForwards := make([]portforwarding.PortForward, 0, len(conn.LocalForwards))
 	for _, f := range conn.LocalForwards {
-		localForwards = append(localForwards, portforwarding.NewPortForwardFromConfig(f))
+		pfRow, pf := NewPortForwardFromConfig(ctx, f)
+		connectionRow.LocalForwards = append(connectionRow.LocalForwards, pfRow)
+		localForwards = append(localForwards, pf)
 	}
 
+	go func() {
+		for _, forward := range localForwards {
+			connectionRow.NewLocalForwards <- forward
+		}
+	}()
+
+	connectionRow.RemoteForwards = make([]PortForward, 0, len(conn.RemoteForwards))
 	remoteForwards := make([]portforwarding.PortForward, 0, len(conn.RemoteForwards))
 	for _, f := range conn.LocalForwards {
-		remoteForwards = append(remoteForwards, portforwarding.NewPortForwardFromConfig(f))
+		pfRow, pf := NewPortForwardFromConfig(ctx, f)
+		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pfRow)
+		remoteForwards = append(remoteForwards, pf)
 	}
 
-	return NewConnectionRow(conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile).
-		WithLocalForwards(localForwards).
-		WithRemoteForwards(remoteForwards)
-}
-
-func (row connectionRow) WithLocalForwards(forwards []portforwarding.PortForward) connectionRow {
-	row.LocalForwards = forwards
 	go func() {
-		for _, forward := range forwards {
-			row.NewLocalForwards <- forward
+		for _, forward := range remoteForwards {
+			connectionRow.NewRemoteForwards <- forward
 		}
 	}()
-	return row
-}
 
-func (row connectionRow) WithRemoteForwards(forwards []portforwarding.PortForward) connectionRow {
-	row.RemoteForwards = forwards
-	go func() {
-		for _, forward := range forwards {
-			row.NewRemoteForwards <- forward
-		}
-	}()
-	return row
+	return connectionRow
 }
 
 func (row connectionRow) AsTableRow() table.Row {
@@ -156,7 +154,7 @@ func makeColumns(width int) []table.Column {
 }
 
 func tableRows(cons []connectionRow) []table.Row {
-	rows := make([]table.Row, 0, len(cons))
+	rows := make([]table.Row, 0, len(cons) + 1)
 	for _, connection := range cons {
 		rows = append(rows, connection.AsTableRow())
 	}

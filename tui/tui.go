@@ -104,7 +104,7 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 
 	connections := make([]connectionRow, 0, len(cfg.Connections))
 	for _, conn := range cfg.Connections {
-		connections = append(connections, connectionRowFromConfig(conn))
+		connections = append(connections, connectionRowFromConfig(ctx, conn))
 	}
 
 	modal := &Model{

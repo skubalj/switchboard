@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/skubalj/switchboard/config"
@@ -347,4 +348,34 @@ func (m ErrorModal) Render() contentBlock {
 		Width:   frame.Width,
 		Height:  frame.Height,
 	}
+}
+
+type PortForwardingModal struct {
+	portForwards []PortForward
+	tableState   table.Model
+	isLocal      bool
+}
+
+func NewLocalForwardingModal(forwards []PortForward) modal {
+	return &PortForwardingModal{
+		portForwards: forwards,
+		tableState:   table.New(),
+		isLocal:      true,
+	}
+}
+
+func NewRemoteForwardingModal(forwards []PortForward) modal {
+	return &PortForwardingModal{
+		portForwards: forwards,
+		tableState:   table.New(),
+		isLocal:      false,
+	}
+}
+
+func (m *PortForwardingModal) Update(msg tea.Msg) (modal, tea.Cmd) {
+	return m, nil
+}
+
+func (m PortForwardingModal) Render() contentBlock {
+	return contentBlock{}
 }
