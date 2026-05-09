@@ -18,7 +18,8 @@ type Args struct {
 	SetConfig *setConfigSubcommand `arg:"subcommand:set-config" help:"set values in the config file"`
 
 	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.yaml]"`
-	Verbose    bool   `arg:"-v,--verbose" help:"Show additional logging"`
+	Version    bool   `arg:"-V,--version" help:"show version information"`
+	Verbose    bool   `arg:"-v,--verbose" help:"show additional logging"`
 	Copyright  bool   `arg:"-c,--copyright" help:"display GPL copyright notice"`
 }
 
@@ -80,6 +81,13 @@ func (s setConfigSubcommand) Run(configFilePath string) error {
 func main() {
 	var args Args
 	arg.MustParse(&args)
+
+	if args.Version {
+		fmt.Println(`switchboard v0.0.0-dev
+Copyright (C) 2026 Joseph Skubal
+This program is free software released under the GNU GPLv3`)
+		return
+	}
 
 	// Get config file path
 	configFilePath := args.ConfigFile

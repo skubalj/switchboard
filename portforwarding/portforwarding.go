@@ -82,9 +82,6 @@ func ConnectToClient(
 	msgs messaging.Tx,
 	conn Connection,
 ) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	authMethod, err := conn.Auth.Create()
 	if err != nil {
 		return fmt.Errorf("unable to generate auth: %w", err)
@@ -150,6 +147,7 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 	}
 
 	msgs.Infof("Now listening on local port %s", addresses.LocalAddr)
+	defer msgs.Infof("Listener on local port %s closed", addresses.LocalAddr)
 
 	go func() {
 		select {
@@ -198,7 +196,8 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 		return fmt.Errorf("unable to open listener for remote address %s: %w", addresses.RemoteAddr, err)
 	}
 
-	msgs.Infof("Now listening on host %s@%s to port %s", client.User(), client.LocalAddr(), addresses.LocalAddr)
+	msgs.Infof("Now listening on host %s@%s to port %s", client.User(), client.LocalAddr(), addresses.RemoteAddr)
+	defer msgs.Infof("Listener on host %s@%s to port %s closed", client.User(), client.LocalAddr(), addresses.RemoteAddr)
 
 	go func() {
 		<-ctx.Done()

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"net/netip"
 	"strconv"
@@ -43,6 +44,27 @@ func (pf PortForward) LocalString() string {
 
 func (pf PortForward) RemoteString() string {
 	return pf.RemoteAddr.String() + ":" + pf.LocalString()
+}
+
+func newPortForward(localHost, localPort, remoteHost, remotePort string) (config.PortForward, error) {
+	local, e1 := parseAddrPort(localHost, localPort)
+	remote, e2 := parseAddrPort(remoteHost, remotePort)
+	return config.PortForward{LocalAddr: local, RemoteAddr: remote}, cmp.Or(e1, e2)
+}
+
+func parseAddrPort(host, port string) (netip.AddrPort, error) {
+	var addr netip.Addr
+	var e1 error
+
+	switch host {
+	case "", "localhost":
+		addr, e1 = netip.ParseAddr("127.0.0.1")
+	default:
+		addr, e1 = netip.ParseAddr(host)
+	}
+
+	p, e2 := strconv.ParseUint(port, 10, 16)
+	return netip.AddrPortFrom(addr, uint16(p)), cmp.Or(e1, e2)
 }
 
 func newLocalForwardingTable(forwards []PortForward) table.Model {
@@ -92,7 +114,7 @@ func makeLocalForwardingRows(forwards []PortForward) []table.Row {
 func newRemoteForwardingTable(forwards []PortForward) table.Model {
 	tbl := table.New(
 		table.WithColumns(makeLocalForwardingColumns(100)),
-		table.WithRows(makeLocalForwardingRows(forwards)),
+		table.WithRows(makeRemoteForwardingRows(forwards)),
 		table.WithFocused(false),
 	)
 	tbl.SetStyles(style.Table)

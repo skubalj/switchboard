@@ -55,8 +55,8 @@ type contentBlock struct {
 type keyMap struct {
 	Up            key.Binding
 	Down          key.Binding
-	Select        key.Binding
-	Apply         key.Binding
+	Connect       key.Binding
+	Disconnect    key.Binding
 	ExpandLogs    key.Binding
 	ForwardLocal  key.Binding
 	ForwardRemote key.Binding
@@ -67,8 +67,8 @@ type keyMap struct {
 var DefaultKeyMap = keyMap{
 	Up:            key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
 	Down:          key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
-	Select:        key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "Select")),
-	Apply:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Apply")),
+	Connect:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Accept")),
+	Disconnect:    key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Disconnect")),
 	ExpandLogs:    key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
 	ForwardLocal:  key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
 	ForwardRemote: key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
@@ -82,11 +82,11 @@ func (k keyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Up,
 		k.Down,
-		k.Select,
+		k.Connect,
+		k.Disconnect,
 		k.ExpandLogs,
 		k.ForwardLocal,
 		k.ForwardRemote,
-		k.Apply,
 		k.Cancel,
 		k.Exit,
 	}
@@ -202,21 +202,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.connectionTable.MoveDown(1)
 			}
 
-		case key.Matches(msg, m.keyMap.Apply):
-			selectedRow := m.connectionTable.SelectedRow()
+		case key.Matches(msg, m.keyMap.Connect):
 			selectedIdx := m.connectionTable.Cursor()
-			switch selectedRow[0] {
-			case "+":
+			if selectedIdx >= len(m.connections) {
 				m.modalLayer = NewCollectionModal(m.config.FetchSSHConfig)
-			case "✅":
+			} else if m.connections[selectedIdx].Online {
 				m.connections[selectedIdx].DropConnection()
-			default:
+			} else {
 				selectedConnection := m.connections[selectedIdx]
-				target := selectedRow[1]
+				target := m.connectionTable.SelectedRow()[1]
 				if selectedConnection.SSHKey != "" {
 					target = filepath.Base(selectedConnection.SSHKey)
 				}
 				m.modalLayer = NewPasswordModal(target, selectedConnection.UID)
+			}
+
+		case key.Matches(msg, m.keyMap.Disconnect):
+			selectedIdx := m.connectionTable.Cursor()
+			if selectedIdx < len(m.connections) {
+				if m.connections[selectedIdx].Online {
+					m.modalLayer = NewErrorModal("Delete Error", "You cannot delete a config while it is connected.\nIf you are sure you want to delete this connection, disconnect it first.")
+				} else {
+					m.connections = slices.Delete(m.connections, selectedIdx, selectedIdx+1)
+					m.updateTableRows()
+				}
 			}
 
 		case key.Matches(msg, m.keyMap.ForwardLocal):
@@ -298,9 +307,56 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case NewLocalForward:
+		idx := m.connectionTable.Cursor()
+		if idx >= len(m.connections) {
+			return m, nil
+		}
+		arr := m.connections[idx].LocalForwards
+		display, backend := NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		arr = append(arr, display)
+		go func() { m.connections[idx].NewLocalForwards <- backend }()
+		m.modalLayer = NewLocalForwardingModal(arr)
+		m.connections[idx].LocalForwards = arr
+		m.updateTableRows()
+
 	case DeleteLocalForward:
+		idx := m.connectionTable.Cursor()
+		if idx >= len(m.connections) {
+			return m, nil
+		}
+		portIdx := int(msg)
+		arr := m.connections[idx].LocalForwards
+		arr[portIdx].stopCallback()
+		arr = slices.Delete(arr, portIdx, portIdx+1)
+		m.modalLayer = NewLocalForwardingModal(arr)
+		m.connections[idx].LocalForwards = arr
+		m.updateTableRows()
+
 	case NewRemoteForward:
+		idx := m.connectionTable.Cursor()
+		if idx >= len(m.connections) {
+			return m, nil
+		}
+		arr := m.connections[idx].RemoteForwards
+		display, backend := NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		arr = append(arr, display)
+		go func() { m.connections[idx].NewRemoteForwards <- backend }()
+		m.modalLayer = NewLocalForwardingModal(arr)
+		m.connections[idx].RemoteForwards = arr
+		m.updateTableRows()
+
 	case DeleteRemoteForward:
+		idx := m.connectionTable.Cursor()
+		if idx >= len(m.connections) {
+			return m, nil
+		}
+		portIdx := int(msg)
+		arr := m.connections[idx].RemoteForwards
+		arr[portIdx].stopCallback()
+		arr = slices.Delete(arr, portIdx, portIdx+1)
+		m.modalLayer = NewLocalForwardingModal(arr)
+		m.connections[idx].RemoteForwards = arr
+		m.updateTableRows()
 	}
 
 	return m, nil
@@ -360,12 +416,14 @@ func (m Model) showFullLogs() string {
 func (m Model) mainContent() string {
 	var content strings.Builder
 
-	logsFrameHeight := 8
+	logsFrameDefaultHeight := 8
+	connectionsFrameHeight := max(6, min(20, m.viewportHeight-1-logsFrameDefaultHeight))
+	logsFrameHeight := max(3, m.viewportHeight-connectionsFrameHeight-1)
 
 	connectionsFrame := Frame{
 		Title:  "Active Connections",
 		Width:  m.viewportWidth,
-		Height: m.viewportHeight - 1 - logsFrameHeight,
+		Height: connectionsFrameHeight,
 	}
 
 	m.connectionTable.SetColumns(makeColumns(connectionsFrame.InnerWidth()))

@@ -21,16 +21,35 @@ Switchboard provies a simple TUI that helps you manage which port forwards are
 currently active. It uses a native Go implementation of the SSH protocol, rather
 than using the OpenSSH library. This means that you can leverage Go's excellent
 cross compilation support to create a binary for whatever client you need to
-target. Is your gateway an ARM system running Linux? switchboard has you covered. Is
-your laptop running Windows? Switchboard works for that too.
+target. Is your gateway an ARM system running Linux? switchboard has you
+covered. Is your laptop running Windows? Switchboard works for that too.
 
-## Usage
+## Features
 
-TODO
+- Remembers your last session -- just re-enter your password to reconnect
+- Resolve connection configurations saved in your `.ssh/config` file
+- Hot swap port forwards without breaking the SSH connection
+- Text User Interface is cross platform and usable for headless systems
 
 ## Acknowledgements
 
-Thanks to Stack Overflow user damick for making a great port forwarding
+Thank you to the wonderful community of open source maintainers. This project
+would not be possible without your contributions to the ecosystem.
+
+| Dependency                       | License                       |
+| -------------------------------- | ----------------------------- |
+| charm.land/bubbles/v2            | MIT                           |
+| charm.land/bubbletea/v2          | MIT                           |
+| charm.land/lipgloss/v2           | MIT                           |
+| github.com/alexflint/go-arg      | BSD-2-Clause                  |
+| github.com/kevinburke/ssh_config | MIT                           |
+| github.com/stretchr/testify      | MIT                           |
+| golang.org/x/crypto              | BSD-3-Clause                  |
+| golang.org/x/sync                | BSD-3-Clause                  |
+| sigs.k8s.io/yaml                 | Apache-2.0, BSD-3-Clause, MIT |
+
+And a special thank you to Stack Overflow user damick for making a great port
+forwarding
 [example](https://stackoverflow.com/questions/21417223/simple-ssh-port-forward-in-golang).
 
 ## License

@@ -94,7 +94,7 @@ func (row connectionRow) AsTableRow() table.Row {
 
 	var status string
 	if row.Online {
-		status = "✅"
+		status = "✓"
 	}
 
 	return table.Row{
@@ -144,7 +144,7 @@ func makeColumns(width int) []table.Column {
 	remainder := width % dividedWidth
 
 	return []table.Column{
-		{Title: "S", Width: 1},
+		{Title: " ", Width: 1},
 		{Title: "Connection", Width: dividedWidth + remainder - 1},
 		{Title: "SSH Key", Width: dividedWidth - 2},
 		{Title: "Local Ports", Width: dividedWidth*2 - 2},

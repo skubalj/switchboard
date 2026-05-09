@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -242,6 +243,8 @@ func (m *ConnectionModal) Render() contentBlock {
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 type PasswordModal struct {
 	ConnectionID   uint32
 	PasswordTarget string
@@ -305,6 +308,8 @@ func (m PasswordModal) Render() contentBlock {
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 type ErrorModal struct {
 	Title   string
 	Content string
@@ -329,8 +334,7 @@ func (m *ErrorModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 }
 
 func (m ErrorModal) Render() contentBlock {
-	lines := []string{m.Content}
-	// lines := strings.Split(m.Content, ": ")
+	lines := slices.Collect(strings.Lines(m.Content))
 	length := 0
 	for _, line := range lines {
 		length = max(length, len(line))
@@ -344,11 +348,13 @@ func (m ErrorModal) Render() contentBlock {
 	}
 
 	return contentBlock{
-		Content: frame.Render(strings.Join(lines, "\n")),
+		Content: frame.Render(strings.Join(lines, "")),
 		Width:   frame.Width,
 		Height:  frame.Height,
 	}
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 type PortForwardingModal struct {
 	portForwards []PortForward
@@ -390,6 +396,15 @@ func (m *PortForwardingModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 					return NewEditRemoteForwardModal(), nil
 				}
 			}
+		case "delete":
+			idx := m.tableState.Cursor()
+			if idx < len(m.portForwards) {
+				if m.isLocal {
+					return nil, func() tea.Msg { return DeleteLocalForward(idx) }
+				} else {
+					return nil, func() tea.Msg { return DeleteRemoteForward(idx) }
+				}
+			}
 		case "up":
 			m.tableState.MoveUp(1)
 		case "down":
@@ -428,6 +443,8 @@ func (m PortForwardingModal) Render() contentBlock {
 		Height:  frame.Height,
 	}
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 type EditLocalForwardModal struct {
 	selectedInput int
@@ -474,7 +491,12 @@ func (m *EditLocalForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 		case "enter":
 			switch m.selectedInput {
 			case 4: // accept
-				return nil, nil
+				forward, err := newPortForward(m.localHost.Value(), m.localPort.Value(), m.remoteHost.Value(), m.remotePort.Value())
+				if err != nil {
+					return NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
+				}
+				return nil, func() tea.Msg { return NewLocalForward(forward) }
+
 			case 5: // cancel
 				return nil, nil
 			}
@@ -586,6 +608,8 @@ func (m EditLocalForwardModal) Render() contentBlock {
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 type EditRemoteForwardModal struct {
 	selectedInput int
 	localHost     textinput.Model
@@ -631,7 +655,12 @@ func (m *EditRemoteForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 		case "enter":
 			switch m.selectedInput {
 			case 4: // accept
-				return nil, nil
+				forward, err := newPortForward(m.localHost.Value(), m.localPort.Value(), m.remoteHost.Value(), m.remotePort.Value())
+				if err != nil {
+					return NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
+				}
+				return nil, func() tea.Msg { return NewRemoteForward(forward) }
+
 			case 5: // cancel
 				return nil, nil
 			}

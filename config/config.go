@@ -52,26 +52,26 @@ func SaveConfig(path string, cfg Config) error {
 }
 
 type Config struct {
-	SSHConfigFile string       `yaml:"sshConfigFile"`
-	Connections   []Connection `yaml:"connections"`
+	SSHConfigFile string       `json:"sshConfigFile"`
+	Connections   []Connection `json:"connections"`
 }
 
 type Connection struct {
-	Host           Host          `yaml:"host"`
-	LocalForwards  []PortForward `yaml:"localForwards"`
-	RemoteForwards []PortForward `yaml:"remoteForwards"`
+	Host           Host          `json:"host"`
+	LocalForwards  []PortForward `json:"localForwards"`
+	RemoteForwards []PortForward `json:"remoteForwards"`
 }
 
 type Host struct {
-	User         string `yaml:"user"`
-	Host         string `yaml:"host"`
-	Port         uint16 `yaml:"port"`
-	IdentityFile string `yaml:"identityFile"`
+	User         string `json:"user"`
+	Host         string `json:"host"`
+	Port         uint16 `json:"port"`
+	IdentityFile string `json:"identityFile"`
 }
 
 type PortForward struct {
-	LocalAddr  netip.AddrPort `yaml:"localAddr"`
-	RemoteAddr netip.AddrPort `yaml:"remoteAddr"`
+	LocalAddr  netip.AddrPort `json:"localAddr"`
+	RemoteAddr netip.AddrPort `json:"remoteAddr"`
 }
 
 func (cfg Config) FetchSSHConfig(host string) (Host, error) {
