@@ -132,6 +132,10 @@ type NewLocalForward config.PortForward
 type DeleteLocalForward int
 type NewRemoteForward config.PortForward
 type DeleteRemoteForward int
+type Error struct {
+	Title string
+	Err   error
+}
 
 func (m Model) Init() tea.Cmd {
 	return m.getLogMessage
@@ -271,22 +275,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		row := m.connections[idx]
 		connection := row.MakeConnection(msg.Password)
 		ctx, dropCallback := context.WithCancel(m.ctx)
-		errCh := make(chan error)
-		err := portforwarding.ConnectToClient(ctx, errCh, m.msgTx, connection)
-		if err != nil {
-			dropCallback()
-			m.modalLayer = NewErrorModal("Connection Error", err.Error())
-			return m, nil
-		}
-
 		m.connections[idx].DropConnection = dropCallback
-		m.connections[idx].Online = true
+		errCh := make(chan error)
 		m.updateTableRows()
 
-		return m, func() tea.Msg {
-			<-errCh
-			return ConnectionDropped(row.UID)
-		}
+		return m, tea.Batch(
+			func() tea.Msg {
+				<-errCh
+				return ConnectionDropped(row.UID)
+			},
+			func() tea.Msg {
+				err := portforwarding.ConnectToClient(ctx, m.config, errCh, m.msgTx, connection)
+				if err != nil {
+					return Error{"Connection Error", err}
+				}
+				return ConnectionEstablished(row.UID)
+			},
+		)
 
 	case ConnectionEstablished:
 		for i, row := range m.connections {
@@ -357,6 +362,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modalLayer = NewLocalForwardingModal(arr)
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
+
+	case Error:
+		m.modalLayer = NewErrorModal(msg.Title, msg.Err.Error())
+		return m, nil
 	}
 
 	return m, nil

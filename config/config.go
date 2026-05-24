@@ -3,11 +3,16 @@ package config
 import (
 	"cmp"
 	"fmt"
+	"iter"
+	"log/slog"
 	"net/netip"
 	"os"
+	"os/exec"
 	osuser "os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/kevinburke/ssh_config"
 	"sigs.k8s.io/yaml"
@@ -34,7 +39,35 @@ func DefaultConfig() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{SSHConfigFile: filepath.Join(homedir, ".ssh", "config")}, nil
+	hostKeyTypes, err := FetchHostKeyTypes()
+	if err != nil {
+		slog.Error("unable to fetch key types from ssh command", "error", err)
+	}
+
+	return Config{
+		SSHConfigFile:     filepath.Join(homedir, ".ssh", "config"),
+		KnownHostsFile:    filepath.Join(homedir, ".ssh", "known_hosts"),
+		HostKeyAlgorithms: hostKeyTypes,
+	}, nil
+}
+
+func FetchHostKeyTypes() ([]string, error) {
+	keyTypes, err := exec.Command("ssh", "-Q", "key").Output()
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch host key types from ssh command")
+	}
+
+	return slices.Collect(trimIter(strings.Lines(string(keyTypes)))), nil
+}
+
+func trimIter(x iter.Seq[string]) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for val := range x {
+			if !yield(strings.Trim(val, "\n ")) {
+				return
+			}
+		}
+	}
 }
 
 func SaveConfig(path string, cfg Config) error {
@@ -52,8 +85,10 @@ func SaveConfig(path string, cfg Config) error {
 }
 
 type Config struct {
-	SSHConfigFile string       `json:"sshConfigFile"`
-	Connections   []Connection `json:"connections"`
+	SSHConfigFile     string       `json:"sshConfigFile"`
+	KnownHostsFile    string       `json:"knownHostsFile"`
+	HostKeyAlgorithms []string     `json:"hostKeyAlgorithms"`
+	Connections       []Connection `json:"connections"`
 }
 
 type Connection struct {

@@ -28,6 +28,7 @@ covered. Is your laptop running Windows? Switchboard works for that too.
 
 - Remembers your last session -- just re-enter your password to reconnect
 - Resolve connection configurations saved in your `.ssh/config` file
+- Import host key algorithm priority from your system ssh command
 - Hot swap port forwards without breaking the SSH connection
 - Text User Interface is cross platform and usable for headless systems
 

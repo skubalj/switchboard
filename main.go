@@ -13,19 +13,26 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const versionString = "v0.0.0-dev"
+
 type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`
 	SetConfig *setConfigSubcommand `arg:"subcommand:set-config" help:"set values in the config file"`
 
 	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.yaml]"`
-	Version    bool   `arg:"-V,--version" help:"show version information"`
 	Verbose    bool   `arg:"-v,--verbose" help:"show additional logging"`
-	Copyright  bool   `arg:"-c,--copyright" help:"display GPL copyright notice"`
+	Copyright  bool   `arg:"--copyright" help:"display GPL copyright notice"`
 }
 
 func (Args) Epilogue() string {
 	return `This program is free software released under the GNU GPLv3
 Copyright (C) 2026 Joseph Skubal`
+}
+
+func (Args) Version() string {
+	return fmt.Sprintf(`switchboard %s
+Copyright (C) 2026 Joseph Skubal
+This program is free software released under the GNU GPLv3`, versionString)
 }
 
 const gplCopyrightNotice = `switchboard: SSH Port Forwarding Interface
@@ -62,7 +69,9 @@ func (s getConfigSubcommand) Run(configFilePath string) error {
 }
 
 type setConfigSubcommand struct {
-	SSHConfigFile string `arg:"--ssh-config-file" help:"set the SSH Config file"`
+	SSHConfigFile      string `arg:"--ssh-config-file" help:"set the SSH config file"`
+	KnownHostsFile     string `arg:"--known-hosts-file" help:"set the SSH known_hosts file"`
+	ImportHostKeyTypes bool   `arg:"--import-host-key-types" help:"import the set the set of host key types supported by the ssh command on this system"`
 }
 
 func (s setConfigSubcommand) Run(configFilePath string) error {
@@ -75,19 +84,23 @@ func (s setConfigSubcommand) Run(configFilePath string) error {
 		cfg.SSHConfigFile = s.SSHConfigFile
 	}
 
+	if s.KnownHostsFile != "" {
+		cfg.KnownHostsFile = s.KnownHostsFile
+	}
+
+	if s.ImportHostKeyTypes {
+		cfg.HostKeyAlgorithms, err = config.FetchHostKeyTypes()
+		if err != nil {
+			return err
+		}
+	}
+
 	return config.SaveConfig(configFilePath, cfg)
 }
 
 func main() {
 	var args Args
 	arg.MustParse(&args)
-
-	if args.Version {
-		fmt.Println(`switchboard v0.0.0-dev
-Copyright (C) 2026 Joseph Skubal
-This program is free software released under the GNU GPLv3`)
-		return
-	}
 
 	// Get config file path
 	configFilePath := args.ConfigFile

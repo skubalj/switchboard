@@ -8,10 +8,13 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -78,20 +81,41 @@ func (a PrivateKeyAuth) Create() (ssh.AuthMethod, error) {
 // Connect to the client and listen for commands on a background thread
 func ConnectToClient(
 	ctx context.Context,
+	cfg config.Config,
 	errCh chan<- error,
 	msgs messaging.Tx,
 	conn Connection,
 ) error {
+	innerKnownHostsCallback, err := knownhosts.New(cfg.KnownHostsFile)
+	if err != nil {
+		return err
+	}
+	hostKeyCB := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := innerKnownHostsCallback(hostname, remote, key)
+		if err != nil {
+			typed, ok := err.(*knownhosts.KeyError)
+			if ok {
+				msgs.Errorf("key for host '%s' with type '%s' not found in known_hosts file -- connect with ssh to save the key", hostname, key.Type())
+				msgs.Debugf("found %d keys for host '%s' (%s)", len(typed.Want), hostname, strings.Join(keyTypes(typed.Want), ", "))
+			}
+		} else {
+			msgs.Debugf("verified host '%s' with %s key", hostname, key.Type())
+		}
+
+		return err
+	}
+
 	authMethod, err := conn.Auth.Create()
 	if err != nil {
 		return fmt.Errorf("unable to generate auth: %w", err)
 	}
 
 	config := &ssh.ClientConfig{
-		User:            conn.User,
-		Auth:            []ssh.AuthMethod{authMethod},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         60 * time.Second,
+		User:              conn.User,
+		Auth:              []ssh.AuthMethod{authMethod},
+		HostKeyCallback:   hostKeyCB,
+		Timeout:           60 * time.Second,
+		HostKeyAlgorithms: cfg.HostKeyAlgorithms,
 	}
 
 	// Connect to the remote server and perform the SSH handshake.
@@ -102,6 +126,14 @@ func ConnectToClient(
 
 	go mainLoop(ctx, errCh, msgs, client, conn)
 	return nil
+}
+
+func keyTypes(keys []knownhosts.KnownKey) []string {
+	types := make([]string, 0, len(keys))
+	for _, key := range keys {
+		types = append(types, key.Key.Type())
+	}
+	return types
 }
 
 func mainLoop(
