@@ -43,7 +43,7 @@ func (pf PortForward) LocalString() string {
 }
 
 func (pf PortForward) RemoteString() string {
-	return pf.RemoteAddr.String() + ":" + pf.LocalString()
+	return pf.RemoteAddr.String() + ":" + pf.LocalAddr.String()
 }
 
 func newPortForward(localHost, localPort, remoteHost, remotePort string) (config.PortForward, error) {
@@ -102,7 +102,7 @@ func makeLocalForwardingRows(forwards []PortForward) []table.Row {
 	}
 
 	rows = append(rows, table.Row{
-		"+  New Connection",
+		"+  New Local Forward",
 		"",
 		"",
 		"",
@@ -147,7 +147,7 @@ func makeRemoteForwardingRows(forwards []PortForward) []table.Row {
 	}
 
 	rows = append(rows, table.Row{
-		"+  New Connection",
+		"+  New Remote Forward",
 		"",
 		"",
 		"",

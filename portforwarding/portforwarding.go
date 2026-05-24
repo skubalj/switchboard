@@ -1,6 +1,7 @@
 package portforwarding
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -170,6 +171,11 @@ func mainLoop(
 
 // Connections to the given TCP port on the local (client) host are to be forwarded to the given host and port
 func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
+	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
+		msgs.Debugf("skipping closed forward from local address '%s' to remote address '%s'", addresses.LocalAddr.String(), addresses.RemoteAddr.String())
+		return nil
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -220,6 +226,11 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 
 // Connections to the given TCP port on the remote (server) host are to be forwarded to the local side
 func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
+	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
+		msgs.Debugf("skipping closed forward from remote address '%s' to local address '%s'", addresses.RemoteAddr.String(), addresses.LocalAddr.String())
+		return nil
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

@@ -41,7 +41,6 @@ type Model struct {
 	modalLayer      modal
 }
 
-
 type keyMap struct {
 	Up            key.Binding
 	Down          key.Binding
@@ -206,7 +205,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selectedConnection := m.connections[selectedIdx]
 				target := m.connectionTable.SelectedRow()[1]
 				if selectedConnection.SSHKey != "" {
-					target = filepath.Base(selectedConnection.SSHKey)
+					target = "key " + filepath.Base(selectedConnection.SSHKey)
 				}
 				m.modalLayer = NewPasswordModal(target, selectedConnection.UID)
 			}
