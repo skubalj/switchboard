@@ -96,7 +96,7 @@ func ConnectToClient(
 			typed, ok := err.(*knownhosts.KeyError)
 			if ok {
 				msgs.Errorf("key for host '%s' with type '%s' not found in known_hosts file -- connect with ssh to save the key", hostname, key.Type())
-				msgs.Debugf("found %d keys for host '%s' (%s)", len(typed.Want), hostname, strings.Join(keyTypes(typed.Want), ", "))
+				msgs.Debugf("found %d keys for host '%s' with types: %s", len(typed.Want), hostname, strings.Join(keyTypes(typed.Want), ", "))
 			}
 		} else {
 			msgs.Debugf("verified host '%s' with %s key", hostname, key.Type())
