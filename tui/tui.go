@@ -41,16 +41,6 @@ type Model struct {
 	modalLayer      modal
 }
 
-type modal interface {
-	Update(msg tea.Msg) (modal, tea.Cmd)
-	Render() contentBlock
-}
-
-type contentBlock struct {
-	Content string
-	Width   int
-	Height  int
-}
 
 type keyMap struct {
 	Up            key.Binding
