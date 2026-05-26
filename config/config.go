@@ -63,7 +63,10 @@ func FetchHostKeyTypes() ([]string, error) {
 func trimIter(x iter.Seq[string]) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		for val := range x {
-			if !yield(strings.Trim(val, "\n ")) {
+			trimmed := strings.Trim(val, "\n\r ")
+			if trimmed == "" {
+				continue // remove blank lines
+			} else if !yield(trimmed) {
 				return
 			}
 		}
