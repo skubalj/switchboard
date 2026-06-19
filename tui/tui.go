@@ -147,6 +147,7 @@ func (m Model) GetConfigConnections() []config.Connection {
 		}
 		conns = append(conns, config.Connection{
 			Host: config.Host{
+				Name:         conn.Name,
 				User:         conn.User,
 				Host:         conn.Host,
 				Port:         conn.Port,
@@ -399,10 +400,9 @@ func (m *Model) View() tea.View {
 
 func (m Model) showFullLogs() string {
 	frame := Frame{
-		Title:    "Logs",
-		Width:    m.viewportWidth,
-		Height:   m.viewportHeight,
-		PaddingX: 1,
+		Title:  "Logs",
+		Width:  m.viewportWidth,
+		Height: m.viewportHeight,
 	}
 
 	m.logsViewport.SetWidth(frame.InnerWidth())
@@ -431,10 +431,9 @@ func (m Model) mainContent() string {
 	fmt.Fprintln(&content, connectionsFrame.Render(m.connectionTable.View()))
 
 	logsFrame := Frame{
-		Title:    "Logs",
-		Width:    m.viewportWidth,
-		Height:   logsFrameHeight,
-		PaddingX: 1,
+		Title:  "Logs",
+		Width:  m.viewportWidth,
+		Height: logsFrameHeight,
 	}
 
 	var logs strings.Builder

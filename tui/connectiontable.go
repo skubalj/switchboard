@@ -19,6 +19,7 @@ import (
 type connectionRow struct {
 	UID               uint32
 	Online            bool
+	Name              string
 	User              string
 	Host              string
 	Port              uint16
@@ -33,9 +34,10 @@ type connectionRow struct {
 var rowIdx = new(atomic.Uint32)
 
 // Initialize a new connection row
-func NewConnectionRow(user string, host string, port uint16, sshkey string) connectionRow {
+func NewConnectionRow(name string, user string, host string, port uint16, sshkey string) connectionRow {
 	return connectionRow{
 		UID:               rowIdx.Add(1),
+		Name:              name,
 		User:              user,
 		Host:              host,
 		Port:              port,
@@ -48,7 +50,7 @@ func NewConnectionRow(user string, host string, port uint16, sshkey string) conn
 }
 
 func connectionRowFromConfig(ctx context.Context, conn config.Connection) connectionRow {
-	connectionRow := NewConnectionRow(conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile)
+	connectionRow := NewConnectionRow(conn.Host.Name, conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile)
 
 	connectionRow.LocalForwards = make([]PortForward, 0, len(conn.LocalForwards))
 	localForwards := make([]portforwarding.PortForward, 0, len(conn.LocalForwards))
@@ -82,16 +84,6 @@ func connectionRowFromConfig(ctx context.Context, conn config.Connection) connec
 }
 
 func (row connectionRow) AsTableRow() table.Row {
-	localForwards := make([]string, 0, len(row.LocalForwards))
-	for _, fw := range row.LocalForwards {
-		localForwards = append(localForwards, fw.LocalString())
-	}
-
-	remoteForwards := make([]string, 0, len(row.RemoteForwards))
-	for _, fw := range row.RemoteForwards {
-		remoteForwards = append(remoteForwards, fw.RemoteString())
-	}
-
 	var status string
 	if row.Online {
 		status = "✓"
@@ -99,10 +91,11 @@ func (row connectionRow) AsTableRow() table.Row {
 
 	return table.Row{
 		status,
+		row.Name,
 		fmt.Sprintf("%s@%s:%d", row.User, row.Host, row.Port),
 		row.SSHKey,
-		strings.Join(localForwards, "  "),
-		strings.Join(remoteForwards, "  "),
+		strconv.Itoa(len(row.LocalForwards)),
+		strconv.Itoa(len(row.RemoteForwards)),
 	}
 }
 
@@ -139,16 +132,22 @@ func resolveUserDir(path string) string {
 }
 
 func makeColumns(width int) []table.Column {
-	width -= 4
-	dividedWidth := width / 6
-	remainder := width % dividedWidth
+	width -= 4  // border and padding
+	width -= 36 // local and remote ports, plus padding on columns
+	dividedWidth := width / 4
+
+	var remainder int
+	if dividedWidth != 0 {
+		remainder = width % dividedWidth
+	}
 
 	return []table.Column{
 		{Title: " ", Width: 1},
-		{Title: "Connection", Width: dividedWidth + remainder - 1},
+		{Title: "Name", Width: dividedWidth - 2},
+		{Title: "Connection", Width: 2*dividedWidth + remainder - 2},
 		{Title: "SSH Key", Width: dividedWidth - 2},
-		{Title: "Local Ports", Width: dividedWidth*2 - 2},
-		{Title: "Remote Ports", Width: dividedWidth*2 - 2},
+		{Title: "Local Forwards", Width: 16},
+		{Title: "Remote Forwards", Width: 16},
 	}
 }
 
@@ -161,6 +160,7 @@ func tableRows(cons []connectionRow) []table.Row {
 	rows = append(rows, table.Row{
 		"+",
 		"New Connection",
+		"",
 		"",
 		"",
 		"",

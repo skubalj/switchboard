@@ -28,7 +28,7 @@ func makeInputBoxStyle() textinput.Styles {
 
 func makeTableStyles() table.Styles {
 	style := table.DefaultStyles()
-	style.Selected = style.Selected.Inherit(ButtonSelected)
+	style.Selected = style.Selected.Foreground(lipgloss.Color("#000000")).Background(lipgloss.BrightBlue)
 	style.Header = style.Header.
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.BrightBlue).

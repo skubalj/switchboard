@@ -16,6 +16,7 @@ import (
 type ConnectionModal struct {
 	configLookup func(string) (config.Host, error)
 	modalTitle   string
+	name         textinput.Model
 	user         textinput.Model
 	host         textinput.Model
 	port         textinput.Model
@@ -49,7 +50,8 @@ var connectionModalKeymap = struct {
 type ConnectionModalField int
 
 const (
-	userField ConnectionModalField = iota
+	nameField ConnectionModalField = iota
+	userField
 	hostField
 	portField
 	sshKeyField
@@ -68,11 +70,14 @@ func NewCollectionModal(configLookup func(string) (config.Host, error)) *Connect
 	modal := ConnectionModal{
 		configLookup: configLookup,
 		modalTitle:   "New Connection",
+		name:         input,
 		user:         input,
 		host:         input,
 		port:         input,
 		sshKey:       input,
 	}
+
+	modal.name.Prompt = "Name: "
 
 	osUser, err := user.Current()
 	if err == nil {
@@ -94,6 +99,7 @@ func NewCollectionModal(configLookup func(string) (config.Host, error)) *Connect
 func EditCollectionModal(row connectionRow, configLookup func(string) (config.Host, error)) modal {
 	modal := NewCollectionModal(configLookup)
 	modal.modalTitle = "Edit Connection"
+	modal.name.SetValue(row.Name)
 	modal.user.SetValue(row.User)
 	modal.host.SetValue(row.Host)
 	modal.port.SetValue(strconv.FormatUint(uint64(row.Port), 10))
@@ -107,6 +113,8 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 
 	// Only the "focused" input fields will respond, so we can publish to all of them
 	var cmd tea.Cmd
+	m.name, cmd = m.name.Update(msg)
+	cmdArray = append(cmdArray, cmd)
 	m.user, cmd = m.user.Update(msg)
 	cmdArray = append(cmdArray, cmd)
 	m.host, cmd = m.host.Update(msg)
@@ -152,6 +160,7 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 				if err == nil {
 					return nil, func() tea.Msg {
 						return NewConnectionRow(
+							m.name.Value(),
 							cmp.Or(m.user.Value(), m.user.Placeholder),
 							m.host.Value(),
 							uint16(port),
@@ -190,7 +199,7 @@ func (m *ConnectionModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 }
 
 func (m *ConnectionModal) setFromConfig() {
-	host, err := m.configLookup(m.host.Value())
+	host, err := m.configLookup(m.name.Value())
 	if err != nil {
 		m.errString = err.Error()
 		return
@@ -203,12 +212,15 @@ func (m *ConnectionModal) setFromConfig() {
 }
 
 func (m *ConnectionModal) SetFocus() tea.Cmd {
+	m.name.Blur()
 	m.user.Blur()
 	m.host.Blur()
 	m.port.Blur()
 	m.sshKey.Blur()
 
 	switch m.selected {
+	case nameField:
+		return m.name.Focus()
 	case userField:
 		return m.user.Focus()
 	case hostField:
@@ -224,6 +236,8 @@ func (m *ConnectionModal) SetFocus() tea.Cmd {
 
 func (m *ConnectionModal) Render() contentBlock {
 	var buf strings.Builder
+	buf.WriteString(m.name.View())
+	buf.WriteRune('\n')
 	buf.WriteString(m.user.View())
 	buf.WriteRune('\n')
 	buf.WriteString(m.host.View())
@@ -258,7 +272,7 @@ func (m *ConnectionModal) Render() contentBlock {
 	frame := Frame{
 		Title:    m.modalTitle,
 		Width:    54,
-		Height:   8,
+		Height:   9,
 		PaddingX: 1,
 	}
 

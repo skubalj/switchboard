@@ -102,7 +102,7 @@ func makeLocalForwardingRows(forwards []PortForward) []table.Row {
 	}
 
 	rows = append(rows, table.Row{
-		"+  New Local Forward",
+		"+  New Forward",
 		"",
 		"",
 		"",
@@ -147,7 +147,7 @@ func makeRemoteForwardingRows(forwards []PortForward) []table.Row {
 	}
 
 	rows = append(rows, table.Row{
-		"+  New Remote Forward",
+		"+  New Forward",
 		"",
 		"",
 		"",

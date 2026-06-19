@@ -101,6 +101,7 @@ type Connection struct {
 }
 
 type Host struct {
+	Name         string `json:"name"`
 	User         string `json:"user"`
 	Host         string `json:"host"`
 	Port         uint16 `json:"port"`
@@ -158,6 +159,7 @@ func (cfg Config) FetchSSHConfig(host string) (Host, error) {
 	}
 
 	return Host{
+		Name:         host,
 		User:         user,
 		Host:         cmp.Or(hostName, host),
 		Port:         uint16(port),

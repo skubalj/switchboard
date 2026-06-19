@@ -64,7 +64,7 @@ func (rx Rx) NextMessage(ctx context.Context) string {
 	case info := <-rx.infoMessages:
 		return formatMessage(lipgloss.Green, "INFO ", info)
 	case debug := <-rx.debugMessages:
-		return formatMessage(lipgloss.Blue, "DEBUG", debug)
+		return formatMessage(lipgloss.Blue, "VERB ", debug)
 	}
 }
 

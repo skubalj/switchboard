@@ -62,22 +62,22 @@ func countInChannel[T any](ch chan T) int {
 }
 
 func Test_connectionRow_AsTableRow(t *testing.T) {
-	row := NewConnectionRow("user", "hostname", 22, "")
-	require.Equal(t, table.Row{"", "user@hostname:22", "", "", ""}, row.AsTableRow())
+	row := NewConnectionRow("Connection", "user", "hostname", 22, "")
+	require.Equal(t, table.Row{"", "Connection", "user@hostname:22", "", "", ""}, row.AsTableRow())
 
 	row.SSHKey = "~/.ssh/id_ed25519"
 	row.Port = 2222
-	require.Equal(t, table.Row{"", "user@hostname:2222", "~/.ssh/id_ed25519", "", ""}, row.AsTableRow())
+	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "", ""}, row.AsTableRow())
 
 	row.LocalForwards = append(row.LocalForwards, PortForward{
 		LocalAddr:  netip.MustParseAddrPort("127.0.0.1:8080"),
 		RemoteAddr: netip.MustParseAddrPort("127.0.0.1:3030"),
 	})
-	require.Equal(t, table.Row{"", "user@hostname:2222", "~/.ssh/id_ed25519", "127.0.0.1:8080:127.0.0.1:3030", ""}, row.AsTableRow())
+	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "127.0.0.1:8080:127.0.0.1:3030", ""}, row.AsTableRow())
 
 	row.RemoteForwards = append(row.RemoteForwards, PortForward{
 		LocalAddr:  netip.MustParseAddrPort("127.0.0.1:1234"),
 		RemoteAddr: netip.MustParseAddrPort("127.0.0.1:2234"),
 	})
-	require.Equal(t, table.Row{"", "user@hostname:2222", "~/.ssh/id_ed25519", "127.0.0.1:8080:127.0.0.1:3030", "127.0.0.1:2234:127.0.0.1:1234"}, row.AsTableRow())
+	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "127.0.0.1:8080:127.0.0.1:3030", "127.0.0.1:2234:127.0.0.1:1234"}, row.AsTableRow())
 }
