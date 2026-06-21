@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/tui/components"
 	"github.com/skubalj/switchboard/tui/connectiontable"
@@ -18,7 +19,7 @@ import (
 )
 
 type HostsModal struct {
-	configLookup   func(string) (config.Host, error)
+	configLookup   func(string) ([]config.Host, error)
 	hosts          []connectiontable.ConnectionHost
 	tableState     table.Model
 	selectedIdx    int
@@ -27,7 +28,7 @@ type HostsModal struct {
 	subModal       *connectionmodal.ConnectionModal
 }
 
-func NewHostsModal(hosts []connectiontable.ConnectionHost, configLookup func(string) (config.Host, error)) modal.Window {
+func NewHostsModal(hosts []connectiontable.ConnectionHost, configLookup func(string) ([]config.Host, error)) modal.Window {
 	connectionName := textinput.New()
 	connectionName.Prompt = "> "
 	connectionName.Focus()
@@ -55,8 +56,8 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 		modal, host, cmd := m.subModal.Update(msg)
 		if cmd != nil {
 			return nil, cmd
-		} else if modal == nil {
-			m.hosts = append(m.hosts, host)
+		} else if host != nil {
+			m.hosts = append(m.hosts, *host)
 		}
 		m.subModal = modal
 		m.tableState.SetRows(makeRows(m.hosts))
@@ -79,7 +80,7 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 					m.subModal = connectionmodal.NewConnectionModal(m.configLookup)
 				}
 			case 2:
-				// load
+				m.loadFromConfig()
 			case 3:
 				row := m.createConnectionRow()
 				return nil, func() tea.Msg { return row }
@@ -133,7 +134,7 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 				m.selectedIdx = 1
 				m.tableState.GotoTop()
 			case 1:
-				if m.tableState.Cursor() < len(m.hosts)-1 {
+				if m.tableState.Cursor() < len(m.hosts) {
 					m.tableState.MoveDown(1)
 				} else {
 					m.selectedIdx = 2
@@ -166,6 +167,24 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *HostsModal) loadFromConfig() {
+	hosts, err := m.configLookup(m.connectionName.Value())
+	if err != nil {
+		return
+	}
+
+	for _, host := range hosts {
+		m.hosts = m.hosts[:]
+		m.hosts = append(m.hosts, connectiontable.ConnectionHost{
+			User:   host.User,
+			Host:   host.Host,
+			Port:   host.Port,
+			SSHKey: host.IdentityFile,
+		})
+	}
+	m.tableState.SetRows(makeRows(m.hosts))
 }
 
 func (m *HostsModal) createConnectionRow() connectiontable.ConnectionRow {
@@ -239,9 +258,9 @@ func (m *HostsModal) buttonRow() string {
 			btn = style.ButtonSelected.Render(btn)
 		}
 		buf.WriteString(btn)
-		buf.WriteRune(' ')
+		buf.WriteString("  ")
 	}
-	return buf.String()
+	return lipgloss.NewStyle().Padding(0, 1).Render(buf.String())
 }
 
 func makeColumns(width int) []table.Column {
@@ -292,7 +311,7 @@ var hostModalKeyMap = keyMap{
 	Apply:       key.NewBinding(key.WithKeys("enter")),
 	Cancel:      key.NewBinding(key.WithKeys("esc")),
 	Quit:        key.NewBinding(key.WithKeys("ctrl+c")),
-	Delete:      key.NewBinding(key.WithKeys("del")),
+	Delete:      key.NewBinding(key.WithKeys("delete")),
 	ReorderUp:   key.NewBinding(key.WithKeys("pgup")),
 	ReorderDown: key.NewBinding(key.WithKeys("pgdown")),
 	Next:        key.NewBinding(key.WithKeys("tab")),

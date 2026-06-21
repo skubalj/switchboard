@@ -14,8 +14,8 @@ However, the state of SSH port forwarding is not perfect. It can be difficult to
 remember the order that the port nubmers go in without re-reading the man page.
 It can also be tedious to manually re-type the same commands for commonly used
 systems repeatedly. This can be simplified with shell scripts, but each host
-requires its own process, meaning that you may have to have multiple port
-forwards open at the same time.
+requires its own process, meaning that you may need multiple terminal windows
+open at the same time
 
 Switchboard provies a simple TUI that helps you manage which port forwards are
 currently active. It uses a native Go implementation of the SSH protocol, rather
@@ -28,6 +28,7 @@ covered. Is your laptop running Windows? Switchboard works for that too.
 
 - Remembers your last session -- just re-enter your password to reconnect
 - Resolve connection configurations saved in your `.ssh/config` file
+- Support for arbitrarily nested jump hosts
 - Import host key algorithm priority from your system ssh command
 - Hot swap port forwards without breaking the SSH connection
 - Text User Interface is cross platform and usable for headless systems
@@ -37,17 +38,16 @@ covered. Is your laptop running Windows? Switchboard works for that too.
 Thank you to the wonderful community of open source maintainers. This project
 would not be possible without your contributions to the ecosystem.
 
-| Dependency                       | License                       |
-| -------------------------------- | ----------------------------- |
-| charm.land/bubbles/v2            | MIT                           |
-| charm.land/bubbletea/v2          | MIT                           |
-| charm.land/lipgloss/v2           | MIT                           |
-| github.com/alexflint/go-arg      | BSD-2-Clause                  |
-| github.com/kevinburke/ssh_config | MIT                           |
-| github.com/stretchr/testify      | MIT                           |
-| golang.org/x/crypto              | BSD-3-Clause                  |
-| golang.org/x/sync                | BSD-3-Clause                  |
-| sigs.k8s.io/yaml                 | Apache-2.0, BSD-3-Clause, MIT |
+| Dependency                       | License      |
+| -------------------------------- | ------------ |
+| charm.land/bubbles/v2            | MIT          |
+| charm.land/bubbletea/v2          | MIT          |
+| charm.land/lipgloss/v2           | MIT          |
+| github.com/alexflint/go-arg      | BSD-2-Clause |
+| github.com/kevinburke/ssh_config | MIT          |
+| github.com/stretchr/testify      | MIT          |
+| golang.org/x/crypto              | BSD-3-Clause |
+| golang.org/x/sync                | BSD-3-Clause |
 
 And a special thank you to Stack Overflow user damick for making a great port
 forwarding

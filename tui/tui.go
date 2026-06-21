@@ -60,11 +60,11 @@ type keyMap struct {
 var MainKeyMap = keyMap{
 	Up:               key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
 	Down:             key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
-	Connect:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Accept")),
-	DeleteConnection: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Disconnect")),
+	Connect:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Disconnect")),
+	DeleteConnection: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Remove Connection")),
 	ExpandLogs:       key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
-	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
-	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
+	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Local Forwards")),
+	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Remote Forwards")),
 	Cancel:           key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
 	Exit:             key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "Exit")),
 }
@@ -458,7 +458,7 @@ func (m Model) mainContent() string {
 	}
 
 	fmt.Fprintln(&content, logsFrame.Render(strings.Trim(logs.String(), "\n")))
-	fmt.Fprintln(&content, m.help.View(MainKeyMap))
+	fmt.Fprintln(&content, lipgloss.NewStyle().Padding(0, 1).Render(m.help.View(MainKeyMap)))
 
 	return content.String()
 }

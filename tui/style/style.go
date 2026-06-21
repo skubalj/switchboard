@@ -7,9 +7,11 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+const accentColor = lipgloss.BrightGreen
+
 var (
-	Header           = lipgloss.NewStyle().Foreground(lipgloss.BrightBlue).Bold(true)
-	ButtonSelected   = lipgloss.NewStyle().Foreground(lipgloss.Black).Background(lipgloss.BrightBlue)
+	Header           = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	ButtonSelected   = lipgloss.NewStyle().Foreground(lipgloss.Black).Background(accentColor)
 	InputBox         = makeInputBoxStyle()
 	ErrString        = lipgloss.NewStyle().Foreground(lipgloss.Red)
 	Table            = makeTableStyles()
@@ -19,7 +21,7 @@ var (
 func makeInputBoxStyle() textinput.Styles {
 	style := textinput.DefaultDarkStyles()
 	style.Cursor = textinput.CursorStyle{
-		Color: lipgloss.BrightBlue,
+		Color: accentColor,
 		Shape: tea.CursorBlock,
 	}
 	style.Focused.Prompt = Header
@@ -29,10 +31,11 @@ func makeInputBoxStyle() textinput.Styles {
 
 func makeTableStyles() table.Styles {
 	style := table.DefaultStyles()
-	style.Selected = style.Selected.Foreground(lipgloss.Color("#000000")).Background(lipgloss.BrightBlue)
+	style.Selected = style.Selected.Foreground(lipgloss.Color("#000000")).Background(accentColor)
 	style.Header = style.Header.
+		Foreground(lipgloss.White).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.BrightBlue).
+		BorderForeground(accentColor).
 		BorderBottom(true).
 		Bold(true)
 	return style
@@ -42,8 +45,9 @@ func makeTableNoSelectionStyles() table.Styles {
 	style := table.DefaultStyles()
 	style.Selected = style.Cell.Padding(0)
 	style.Header = style.Header.
+		Foreground(lipgloss.White).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.BrightBlue).
+		BorderForeground(accentColor).
 		BorderBottom(true).
 		Bold(true)
 	return style

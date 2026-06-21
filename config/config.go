@@ -113,55 +113,70 @@ type PortForward struct {
 	RemoteAddr netip.AddrPort `json:"remoteAddr"`
 }
 
-func (cfg Config) FetchSSHConfig(host string) (Host, error) {
+func (cfg Config) FetchSSHConfig(host string) ([]Host, error) {
 	configFile, err := os.ReadFile(cfg.SSHConfigFile)
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to open ssh config file: %w", err)
+		return nil, fmt.Errorf("unable to open ssh config file: %w", err)
 	}
 
 	sshCfg, err := ssh_config.DecodeBytes(configFile)
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to decode ssh config file: %w", err)
+		return nil, fmt.Errorf("unable to decode ssh config file: %w", err)
 	}
 
 	user, err := sshCfg.Get(host, "user")
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to get user: %w", err)
+		return nil, fmt.Errorf("unable to get user: %w", err)
 	}
 	if user == "" {
 		usr, err := osuser.Current()
 		if err != nil {
-			return Host{}, fmt.Errorf("unable to fetch current user: %w", err)
+			return nil, fmt.Errorf("unable to fetch current user: %w", err)
 		}
 		user = usr.Name
 	}
 
 	hostName, err := sshCfg.Get(host, "hostname")
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to get hostname: %w", err)
+		return nil, fmt.Errorf("unable to get hostname: %w", err)
 	}
 
 	portStr, err := sshCfg.Get(host, "port")
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to get port: %w", err)
+		return nil, fmt.Errorf("unable to get port: %w", err)
 	}
 	var port uint64 = 22
 	if portStr != "" {
 		port, err = strconv.ParseUint(portStr, 10, 16)
 		if err != nil {
-			return Host{}, fmt.Errorf("unable to parse port: %w", err)
+			return nil, fmt.Errorf("unable to parse port: %w", err)
 		}
 	}
 
 	identityFile, err := sshCfg.Get(host, "identityfile")
 	if err != nil {
-		return Host{}, fmt.Errorf("unable to get identityFile: %w", err)
+		return nil, fmt.Errorf("unable to get identityFile: %w", err)
 	}
 
-	return Host{
+	proxyJump, err := sshCfg.GetAll(host, "proxyjump")
+	if err != nil {
+		return nil, fmt.Errorf("unable to get proxy jump")
+	}
+
+	var hostsList []Host
+	for _, proxy := range proxyJump {
+		proxyHosts, err := cfg.FetchSSHConfig(proxy)
+		if err != nil {
+			return nil, fmt.Errorf("unable to resolve proxy jump '%s' in config", proxy)
+		}
+		hostsList = append(hostsList, proxyHosts...)
+	}
+	hostsList = append(hostsList, Host{
 		User:         user,
 		Host:         cmp.Or(hostName, host),
 		Port:         uint16(port),
 		IdentityFile: identityFile,
-	}, nil
+	})
+
+	return hostsList, nil
 }

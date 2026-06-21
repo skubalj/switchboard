@@ -208,7 +208,7 @@ func (m *TextInputModal) Render() modal.ContentBlock {
 			btn = style.ButtonSelected.Render(btn)
 		}
 		buf.WriteString(btn)
-		buf.WriteRune(' ')
+		buf.WriteString("  ")
 	}
 
 	frame := components.Frame{

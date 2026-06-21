@@ -20,7 +20,7 @@ type ConnectionModal struct {
 	inner         []textinputmodal.TextInputModal
 }
 
-type configLookup = func(string) (config.Host, error)
+type configLookup = func(string) ([]config.Host, error)
 
 const (
 	LoadButton = "Load From Config"
@@ -61,7 +61,7 @@ func NewConnectionModal(configLookup configLookup) *ConnectionModal {
 	}
 }
 
-func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, connectiontable.ConnectionHost, tea.Cmd) {
+func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, *connectiontable.ConnectionHost, tea.Cmd) {
 	button, state := m.inner[m.selectedModal].Update(msg)
 	switch state {
 	case textinputmodal.Ok:
@@ -72,7 +72,7 @@ func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, connectiontable
 			values := m.inner[m.selectedModal].GetValues()
 			port, err := strconv.ParseUint(values[portIdx], 10, 16)
 			if err != nil {
-				return nil, connectiontable.ConnectionHost{}, func() tea.Msg {
+				return nil, nil, func() tea.Msg {
 					return errormodal.ErrorMsg{
 						Title: "Error",
 						Err:   fmt.Errorf("port must be a number"),
@@ -80,7 +80,7 @@ func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, connectiontable
 				}
 			}
 
-			return nil, connectiontable.ConnectionHost{
+			return nil, &connectiontable.ConnectionHost{
 				User:   values[userIdx],
 				Host:   values[hostIdx],
 				Port:   uint16(port),
@@ -88,25 +88,25 @@ func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, connectiontable
 			}, nil
 
 		case Cancel:
-			return nil, connectiontable.ConnectionHost{}, nil
+			return nil, nil, nil
 		}
 	case textinputmodal.Cancel:
-		return nil, connectiontable.ConnectionHost{}, nil
+		return nil, nil, nil
 	case textinputmodal.Quit:
-		return nil, connectiontable.ConnectionHost{}, tea.Quit
+		return nil, nil, tea.Quit
 	}
 
-	return m, connectiontable.ConnectionHost{}, nil
+	return m, nil, nil
 }
 
 func (m *ConnectionModal) setFromConfig() {
 	values := m.inner[m.selectedModal].GetValues()
-
-	host, err := m.configLookup(values[nameIdx])
+	hosts, err := m.configLookup(values[nameIdx])
 	if err != nil {
 		m.inner[m.selectedModal].SetError(err.Error())
 		return
 	}
+	host := hosts[len(hosts)-1]
 
 	values[userIdx] = host.User
 	values[hostIdx] = host.Host
