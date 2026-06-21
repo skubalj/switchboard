@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"github.com/alexflint/go-arg"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/tui"
-	"sigs.k8s.io/yaml"
 )
 
 const versionString = "v0.0.0-dev"
@@ -19,7 +19,7 @@ type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`
 	SetConfig *setConfigSubcommand `arg:"subcommand:set-config" help:"set values in the config file"`
 
-	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.yaml]"`
+	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.json]"`
 	Verbose    bool   `arg:"-v,--verbose" help:"show additional logging"`
 	Copyright  bool   `arg:"--copyright" help:"display GPL copyright notice"`
 }
@@ -60,7 +60,7 @@ func (s getConfigSubcommand) Run(configFilePath string) error {
 	} else if err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("unable to serialize config data: %w", err)
 	}
@@ -111,7 +111,7 @@ func main() {
 			fmt.Println("You can manually configure the switchboard config file with '--config-file'")
 			os.Exit(1)
 		}
-		configFilePath = filepath.Join(home, ".ssh", "switchboard.yaml")
+		configFilePath = filepath.Join(home, ".ssh", "switchboard.json")
 	}
 
 	var err error

@@ -1,4 +1,4 @@
-package tui
+package portforwardmodal
 
 import (
 	"cmp"
@@ -13,7 +13,7 @@ import (
 )
 
 type PortForward struct {
-	stopCallback context.CancelFunc
+	StopCallback context.CancelFunc
 	LocalAddr    netip.AddrPort
 	RemoteAddr   netip.AddrPort
 }
@@ -28,7 +28,7 @@ func NewPortForwardFromConfig(ctx context.Context, f config.PortForward) (PortFo
 	ctx, cancel := context.WithCancel(ctx)
 
 	return PortForward{
-			stopCallback: cancel,
+			StopCallback: cancel,
 			LocalAddr:    f.LocalAddr,
 			RemoteAddr:   f.RemoteAddr,
 		}, portforwarding.PortForward{
@@ -36,14 +36,6 @@ func NewPortForwardFromConfig(ctx context.Context, f config.PortForward) (PortFo
 			LocalAddr:  f.LocalAddr,
 			RemoteAddr: f.RemoteAddr,
 		}
-}
-
-func (pf PortForward) LocalString() string {
-	return pf.LocalAddr.String() + ":" + pf.RemoteAddr.String()
-}
-
-func (pf PortForward) RemoteString() string {
-	return pf.RemoteAddr.String() + ":" + pf.LocalAddr.String()
 }
 
 func newPortForward(localHost, localPort, remoteHost, remotePort string) (config.PortForward, error) {

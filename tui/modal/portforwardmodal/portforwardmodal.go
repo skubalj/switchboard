@@ -1,4 +1,4 @@
-package tui
+package portforwardmodal
 
 import (
 	"strings"
@@ -6,8 +6,17 @@ import (
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/skubalj/switchboard/config"
+	"github.com/skubalj/switchboard/tui/components"
+	"github.com/skubalj/switchboard/tui/modal"
+	"github.com/skubalj/switchboard/tui/modal/errormodal"
 	"github.com/skubalj/switchboard/tui/style"
 )
+
+type NewLocalForward config.PortForward
+type DeleteLocalForward int
+type NewRemoteForward config.PortForward
+type DeleteRemoteForward int
 
 type PortForwardingModal struct {
 	portForwards []PortForward
@@ -15,7 +24,7 @@ type PortForwardingModal struct {
 	isLocal      bool
 }
 
-func NewLocalForwardingModal(forwards []PortForward) modal {
+func NewLocalForwardingModal(forwards []PortForward) modal.Window {
 	return &PortForwardingModal{
 		portForwards: forwards,
 		tableState:   newLocalForwardingTable(forwards),
@@ -23,7 +32,7 @@ func NewLocalForwardingModal(forwards []PortForward) modal {
 	}
 }
 
-func NewRemoteForwardingModal(forwards []PortForward) modal {
+func NewRemoteForwardingModal(forwards []PortForward) modal.Window {
 	return &PortForwardingModal{
 		portForwards: forwards,
 		tableState:   newRemoteForwardingTable(forwards),
@@ -31,7 +40,7 @@ func NewRemoteForwardingModal(forwards []PortForward) modal {
 	}
 }
 
-func (m *PortForwardingModal) Update(msg tea.Msg) (modal, tea.Cmd) {
+func (m *PortForwardingModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -67,13 +76,13 @@ func (m *PortForwardingModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 	return m, nil
 }
 
-func (m PortForwardingModal) Render() contentBlock {
+func (m PortForwardingModal) Render() modal.ContentBlock {
 	title := "Remote Port Forwards"
 	if m.isLocal {
 		title = "Local Port Forwards"
 	}
 
-	frame := Frame{
+	frame := components.Frame{
 		Title:  title,
 		Width:  80,
 		Height: 10,
@@ -88,7 +97,7 @@ func (m PortForwardingModal) Render() contentBlock {
 	m.tableState.SetWidth(frame.InnerWidth())
 	m.tableState.SetHeight(frame.InnerHeight())
 
-	return contentBlock{
+	return modal.ContentBlock{
 		Content: frame.Render(m.tableState.View()),
 		Width:   frame.Width,
 		Height:  frame.Height,
@@ -105,7 +114,7 @@ type EditLocalForwardModal struct {
 	remotePort    textinput.Model
 }
 
-func NewEditLocalForwardModal() modal {
+func NewEditLocalForwardModal() modal.Window {
 	textInput := textinput.New()
 	textInput.SetStyles(style.InputBox)
 
@@ -124,7 +133,7 @@ func NewEditLocalForwardModal() modal {
 	return modal
 }
 
-func (m *EditLocalForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
+func (m *EditLocalForwardModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	cmds := make([]tea.Cmd, 4)
 
 	m.localHost, cmds[0] = m.localHost.Update(msg)
@@ -144,7 +153,7 @@ func (m *EditLocalForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 			case 4: // accept
 				forward, err := newPortForward(m.localHost.Value(), m.localPort.Value(), m.remoteHost.Value(), m.remotePort.Value())
 				if err != nil {
-					return NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
+					return errormodal.NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
 				}
 				return nil, func() tea.Msg { return NewLocalForward(forward) }
 
@@ -210,8 +219,8 @@ func (m *EditLocalForwardModal) updateFocus() {
 	}
 }
 
-func (m EditLocalForwardModal) Render() contentBlock {
-	frame := Frame{
+func (m EditLocalForwardModal) Render() modal.ContentBlock {
+	frame := components.Frame{
 		Title:    "New Local Port Forward",
 		Width:    100,
 		Height:   6,
@@ -252,7 +261,7 @@ func (m EditLocalForwardModal) Render() contentBlock {
 	}
 	lines.WriteString(cancelButton)
 
-	return contentBlock{
+	return modal.ContentBlock{
 		Content: frame.Render(lines.String()),
 		Width:   frame.Width,
 		Height:  frame.Height,
@@ -269,7 +278,7 @@ type EditRemoteForwardModal struct {
 	remotePort    textinput.Model
 }
 
-func NewEditRemoteForwardModal() modal {
+func NewEditRemoteForwardModal() modal.Window {
 	textInput := textinput.New()
 	textInput.SetStyles(style.InputBox)
 
@@ -288,7 +297,7 @@ func NewEditRemoteForwardModal() modal {
 	return modal
 }
 
-func (m *EditRemoteForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
+func (m *EditRemoteForwardModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	cmds := make([]tea.Cmd, 4)
 
 	m.localHost, cmds[0] = m.localHost.Update(msg)
@@ -308,7 +317,7 @@ func (m *EditRemoteForwardModal) Update(msg tea.Msg) (modal, tea.Cmd) {
 			case 4: // accept
 				forward, err := newPortForward(m.localHost.Value(), m.localPort.Value(), m.remoteHost.Value(), m.remotePort.Value())
 				if err != nil {
-					return NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
+					return errormodal.NewErrorModal("Error", "unable to create port forward:\n"+err.Error()), nil
 				}
 				return nil, func() tea.Msg { return NewRemoteForward(forward) }
 
@@ -374,8 +383,8 @@ func (m *EditRemoteForwardModal) updateFocus() {
 	}
 }
 
-func (m EditRemoteForwardModal) Render() contentBlock {
-	frame := Frame{
+func (m EditRemoteForwardModal) Render() modal.ContentBlock {
+	frame := components.Frame{
 		Title:    "New Remote Port Forward",
 		Width:    100,
 		Height:   6,
@@ -416,7 +425,7 @@ func (m EditRemoteForwardModal) Render() contentBlock {
 	}
 	lines.WriteString(cancelButton)
 
-	return contentBlock{
+	return modal.ContentBlock{
 		Content: frame.Render(lines.String()),
 		Width:   frame.Width,
 		Height:  frame.Height,

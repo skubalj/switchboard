@@ -2,6 +2,7 @@ package config
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -15,19 +16,18 @@ import (
 	"strings"
 
 	"github.com/kevinburke/ssh_config"
-	"sigs.k8s.io/yaml"
 )
 
 func GetConfig(path string) (Config, error) {
 	payload, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, fmt.Errorf("unable to read switchboard config file: %w", err)
+		return Config{}, fmt.Errorf("unable to read switchboard config file '%s': %w", path, err)
 	}
 
 	var cfg Config
-	err = yaml.Unmarshal(payload, &cfg)
+	err = json.Unmarshal(payload, &cfg)
 	if err != nil {
-		return Config{}, fmt.Errorf("unable to unmarshal payload: %w", err)
+		return Config{}, fmt.Errorf("unable to unmarshal payload '%s': %w", path, err)
 	}
 
 	return cfg, nil
@@ -74,7 +74,7 @@ func trimIter(x iter.Seq[string]) iter.Seq[string] {
 }
 
 func SaveConfig(path string, cfg Config) error {
-	payload, err := yaml.Marshal(cfg)
+	payload, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -95,13 +95,13 @@ type Config struct {
 }
 
 type Connection struct {
-	Host           Host          `json:"host"`
+	Name           string        `json:"name"`
+	Hosts          []Host        `json:"hosts"`
 	LocalForwards  []PortForward `json:"localForwards"`
 	RemoteForwards []PortForward `json:"remoteForwards"`
 }
 
 type Host struct {
-	Name         string `json:"name"`
 	User         string `json:"user"`
 	Host         string `json:"host"`
 	Port         uint16 `json:"port"`
@@ -159,7 +159,6 @@ func (cfg Config) FetchSSHConfig(host string) (Host, error) {
 	}
 
 	return Host{
-		Name:         host,
 		User:         user,
 		Host:         cmp.Or(hostName, host),
 		Port:         uint16(port),

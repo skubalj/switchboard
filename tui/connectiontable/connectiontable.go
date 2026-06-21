@@ -1,10 +1,11 @@
-package tui
+package connectiontable
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -12,36 +13,42 @@ import (
 	"charm.land/bubbles/v2/table"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/portforwarding"
+	"github.com/skubalj/switchboard/tui/modal/portforwardmodal"
 	"github.com/skubalj/switchboard/tui/style"
 )
 
+var rowIdx = new(atomic.Uint32)
+
 // A row in the connection table
-type connectionRow struct {
+type ConnectionRow struct {
 	UID               uint32
 	Online            bool
 	Name              string
-	User              string
-	Host              string
-	Port              uint16
-	SSHKey            string
-	LocalForwards     []PortForward
+	Hosts             []ConnectionHost
+	LocalForwards     []portforwardmodal.PortForward
 	NewLocalForwards  chan portforwarding.PortForward
-	RemoteForwards    []PortForward
+	RemoteForwards    []portforwardmodal.PortForward
 	NewRemoteForwards chan portforwarding.PortForward
 	DropConnection    context.CancelFunc // Signal that the connection should be dropped
 }
 
-var rowIdx = new(atomic.Uint32)
+type ConnectionHost struct {
+	User   string
+	Host   string
+	Port   uint16
+	SSHKey string
+}
+
+func (h ConnectionHost) Address() string {
+	return fmt.Sprintf("%s@%s:%d", h.User, h.Host, h.Port)
+}
 
 // Initialize a new connection row
-func NewConnectionRow(name string, user string, host string, port uint16, sshkey string) connectionRow {
-	return connectionRow{
+func NewConnectionRow(name string, hosts []ConnectionHost) ConnectionRow {
+	return ConnectionRow{
 		UID:               rowIdx.Add(1),
 		Name:              name,
-		User:              user,
-		Host:              host,
-		Port:              port,
-		SSHKey:            sshkey,
+		Hosts:             hosts,
 		LocalForwards:     nil,
 		NewLocalForwards:  make(chan portforwarding.PortForward),
 		RemoteForwards:    nil,
@@ -49,13 +56,23 @@ func NewConnectionRow(name string, user string, host string, port uint16, sshkey
 	}
 }
 
-func connectionRowFromConfig(ctx context.Context, conn config.Connection) connectionRow {
-	connectionRow := NewConnectionRow(conn.Host.Name, conn.Host.User, conn.Host.Host, conn.Host.Port, conn.Host.IdentityFile)
+func ConnectionRowFromConfig(ctx context.Context, conn config.Connection) ConnectionRow {
+	hosts := make([]ConnectionHost, 0, len(conn.Hosts))
+	for _, host := range conn.Hosts {
+		hosts = append(hosts, ConnectionHost{
+			User:   host.User,
+			Host:   host.Host,
+			Port:   host.Port,
+			SSHKey: host.IdentityFile,
+		})
+	}
 
-	connectionRow.LocalForwards = make([]PortForward, 0, len(conn.LocalForwards))
+	connectionRow := NewConnectionRow(conn.Name, hosts)
+
+	connectionRow.LocalForwards = make([]portforwardmodal.PortForward, 0, len(conn.LocalForwards))
 	localForwards := make([]portforwarding.PortForward, 0, len(conn.LocalForwards))
 	for _, f := range conn.LocalForwards {
-		pfRow, pf := NewPortForwardFromConfig(ctx, f)
+		pfRow, pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
 		connectionRow.LocalForwards = append(connectionRow.LocalForwards, pfRow)
 		localForwards = append(localForwards, pf)
 	}
@@ -66,10 +83,10 @@ func connectionRowFromConfig(ctx context.Context, conn config.Connection) connec
 		}
 	}()
 
-	connectionRow.RemoteForwards = make([]PortForward, 0, len(conn.RemoteForwards))
+	connectionRow.RemoteForwards = make([]portforwardmodal.PortForward, 0, len(conn.RemoteForwards))
 	remoteForwards := make([]portforwarding.PortForward, 0, len(conn.RemoteForwards))
 	for _, f := range conn.RemoteForwards {
-		pfRow, pf := NewPortForwardFromConfig(ctx, f)
+		pfRow, pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
 		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pfRow)
 		remoteForwards = append(remoteForwards, pf)
 	}
@@ -83,7 +100,7 @@ func connectionRowFromConfig(ctx context.Context, conn config.Connection) connec
 	return connectionRow
 }
 
-func (row connectionRow) AsTableRow() table.Row {
+func (row ConnectionRow) AsTableRow() table.Row {
 	var status string
 	if row.Online {
 		status = "✓"
@@ -92,28 +109,64 @@ func (row connectionRow) AsTableRow() table.Row {
 	return table.Row{
 		status,
 		row.Name,
-		fmt.Sprintf("%s@%s:%d", row.User, row.Host, row.Port),
-		row.SSHKey,
+		row.ConnectionString(),
+		row.sshKeyString(),
 		strconv.Itoa(len(row.LocalForwards)),
 		strconv.Itoa(len(row.RemoteForwards)),
 	}
 }
 
+func (row ConnectionRow) sshKeyString() string {
+	sshKeys := make([]string, 0, len(row.Hosts))
+	for _, host := range row.Hosts {
+		if host.SSHKey != "" {
+			sshKeys = append(sshKeys, host.SSHKey)
+		}
+	}
+	slices.Sort(sshKeys)
+	return strings.Join(slices.Compact(sshKeys), ",")
+}
+
+func (row ConnectionRow) ConnectionString() string {
+	if len(row.Hosts) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString(row.Hosts[0].Address())
+	for _, hosts := range row.Hosts[1:] {
+		builder.WriteString(" → ")
+		builder.WriteString(hosts.Address())
+	}
+	return builder.String()
+}
+
 // Create the port forwarding connection side
-func (row connectionRow) MakeConnection(password string) portforwarding.Connection {
-	var auth portforwarding.AuthMethod
-	if row.SSHKey == "" {
-		auth = portforwarding.PasswordAuth{Password: password}
-	} else {
-		auth = portforwarding.PrivateKeyAuth{Path: resolveUserDir(row.SSHKey), Password: password}
+func (row ConnectionRow) MakeConnection(passwords []string) portforwarding.Connection {
+	hosts := make([]portforwarding.ConnectionHost, 0, len(row.Hosts))
+	for idx, host := range row.Hosts {
+		hosts = append(hosts, makeConnectionHost(host, passwords[idx]))
 	}
 
 	return portforwarding.Connection{
-		User:           row.User,
-		Auth:           auth,
-		Host:           row.Host + ":" + strconv.FormatUint(uint64(row.Port), 10),
+		Hosts:          hosts,
 		LocalForwards:  row.NewLocalForwards,
 		RemoteForwards: row.NewRemoteForwards,
+	}
+}
+
+func makeConnectionHost(host ConnectionHost, password string) portforwarding.ConnectionHost {
+	var auth portforwarding.AuthMethod
+	if host.SSHKey == "" {
+		auth = portforwarding.PasswordAuth{Password: password}
+	} else {
+		auth = portforwarding.PrivateKeyAuth{Path: resolveUserDir(host.SSHKey), Password: password}
+	}
+
+	return portforwarding.ConnectionHost{
+		User: host.User,
+		Auth: auth,
+		Host: host.Host + ":" + strconv.Itoa(int(host.Port)),
 	}
 }
 
@@ -131,7 +184,7 @@ func resolveUserDir(path string) string {
 	return filepath.Join(home, suffix)
 }
 
-func makeColumns(width int) []table.Column {
+func MakeColumns(width int) []table.Column {
 	width -= 4  // border and padding
 	width -= 36 // local and remote ports, plus padding on columns
 	dividedWidth := width / 4
@@ -151,7 +204,7 @@ func makeColumns(width int) []table.Column {
 	}
 }
 
-func tableRows(cons []connectionRow) []table.Row {
+func TableRows(cons []ConnectionRow) []table.Row {
 	rows := make([]table.Row, 0, len(cons)+1)
 	for _, connection := range cons {
 		rows = append(rows, connection.AsTableRow())
@@ -169,10 +222,10 @@ func tableRows(cons []connectionRow) []table.Row {
 	return rows
 }
 
-func newTable() table.Model {
+func NewTable() table.Model {
 	connectionTable := table.New(
-		table.WithColumns(makeColumns(100)),
-		table.WithRows(tableRows(nil)),
+		table.WithColumns(MakeColumns(100)),
+		table.WithRows(TableRows(nil)),
 		table.WithFocused(false),
 		table.WithWidth(100),
 	)

@@ -17,7 +17,13 @@ import (
 	"github.com/skubalj/switchboard/messaging"
 	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/ringbuffer"
-	"github.com/skubalj/switchboard/tui/style"
+	"github.com/skubalj/switchboard/tui/components"
+	"github.com/skubalj/switchboard/tui/connectiontable"
+	"github.com/skubalj/switchboard/tui/modal"
+	"github.com/skubalj/switchboard/tui/modal/connectionmodal"
+	"github.com/skubalj/switchboard/tui/modal/errormodal"
+	"github.com/skubalj/switchboard/tui/modal/passwordmodal"
+	"github.com/skubalj/switchboard/tui/modal/portforwardmodal"
 )
 
 type Model struct {
@@ -26,43 +32,42 @@ type Model struct {
 	ctxCancel   func()
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
-	connections []connectionRow
+	connections []connectiontable.ConnectionRow
 	config      config.Config
 
 	// UI State
 	viewportWidth   int
 	viewportHeight  int
-	keyMap          keyMap
 	help            help.Model
 	logs            ringbuffer.RingBuffer[string]
 	logsExpanded    bool
 	logsViewport    viewport.Model
 	connectionTable table.Model
-	modalLayer      modal
+	modalLayer      modal.Window
 }
 
 type keyMap struct {
-	Up            key.Binding
-	Down          key.Binding
-	Connect       key.Binding
-	Disconnect    key.Binding
-	ExpandLogs    key.Binding
-	ForwardLocal  key.Binding
-	ForwardRemote key.Binding
-	Cancel        key.Binding
-	Exit          key.Binding
+	Up               key.Binding
+	Down             key.Binding
+	Connect          key.Binding
+	DeleteConnection key.Binding
+	ExpandLogs       key.Binding
+	ForwardLocal     key.Binding
+	ForwardRemote    key.Binding
+	Cancel           key.Binding
+	Exit             key.Binding
 }
 
-var DefaultKeyMap = keyMap{
-	Up:            key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
-	Down:          key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
-	Connect:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Accept")),
-	Disconnect:    key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Disconnect")),
-	ExpandLogs:    key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
-	ForwardLocal:  key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
-	ForwardRemote: key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
-	Cancel:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
-	Exit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "Exit")),
+var MainKeyMap = keyMap{
+	Up:               key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
+	Down:             key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
+	Connect:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Accept")),
+	DeleteConnection: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Disconnect")),
+	ExpandLogs:       key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
+	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Forward Local")),
+	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Forward Remote")),
+	Cancel:           key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
+	Exit:             key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "Exit")),
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view. It's part
@@ -72,7 +77,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 		k.Up,
 		k.Down,
 		k.Connect,
-		k.Disconnect,
+		k.DeleteConnection,
 		k.ExpandLogs,
 		k.ForwardLocal,
 		k.ForwardRemote,
@@ -91,9 +96,9 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 	ctx, cancel := context.WithCancel(context.TODO())
 	tx, rx := messaging.NewChannels()
 
-	connections := make([]connectionRow, 0, len(cfg.Connections))
+	connections := make([]connectiontable.ConnectionRow, 0, len(cfg.Connections))
 	for _, conn := range cfg.Connections {
-		connections = append(connections, connectionRowFromConfig(ctx, conn))
+		connections = append(connections, connectiontable.ConnectionRowFromConfig(ctx, conn))
 	}
 
 	modal := &Model{
@@ -103,11 +108,10 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 		msgRx:           rx,
 		connections:     connections,
 		config:          cfg,
-		keyMap:          DefaultKeyMap,
 		help:            help.New(),
 		logs:            ringbuffer.New[string](100),
 		logsViewport:    viewport.New(),
-		connectionTable: newTable(),
+		connectionTable: connectiontable.NewTable(),
 	}
 	modal.updateTableRows()
 
@@ -117,42 +121,45 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 type LogMessage string
 type ConnectionEstablished uint32
 type ConnectionDropped uint32
-type NewLocalForward config.PortForward
-type DeleteLocalForward int
-type NewRemoteForward config.PortForward
-type DeleteRemoteForward int
 type Error struct {
 	Title string
 	Err   error
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return m.getLogMessage
 }
 
-func (m Model) getLogMessage() tea.Msg {
+func (m *Model) getLogMessage() tea.Msg {
 	return LogMessage(m.msgRx.NextMessage(m.ctx))
 }
 
-func (m Model) GetConfigConnections() []config.Connection {
+func (m *Model) GetConfigConnections() []config.Connection {
 	conns := make([]config.Connection, 0, len(m.connections))
 	for _, conn := range m.connections {
 		lfs := make([]config.PortForward, 0, len(conn.LocalForwards))
 		for _, fw := range conn.LocalForwards {
 			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
 		}
+
 		rfs := make([]config.PortForward, 0, len(conn.RemoteForwards))
 		for _, fw := range conn.RemoteForwards {
 			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
 		}
+
+		hosts := make([]config.Host, 0, len(conn.Hosts))
+		for _, host := range conn.Hosts {
+			hosts = append(hosts, config.Host{
+				User:         host.User,
+				Host:         host.Host,
+				Port:         host.Port,
+				IdentityFile: host.SSHKey,
+			})
+		}
+
 		conns = append(conns, config.Connection{
-			Host: config.Host{
-				Name:         conn.Name,
-				User:         conn.User,
-				Host:         conn.Host,
-				Port:         conn.Port,
-				IdentityFile: conn.SSHKey,
-			},
+			Name:           conn.Name,
+			Hosts:          hosts,
 			LocalForwards:  lfs,
 			RemoteForwards: rfs,
 		})
@@ -178,66 +185,70 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case key.Matches(msg, m.keyMap.Exit):
+		case key.Matches(msg, MainKeyMap.Exit):
 			m.ctxCancel()
 			return m, tea.Quit
 
-		case key.Matches(msg, m.keyMap.Up):
+		case key.Matches(msg, MainKeyMap.Up):
 			if m.logsExpanded {
 				m.logsViewport.ScrollUp(1)
 			} else {
 				m.connectionTable.MoveUp(1)
 			}
 
-		case key.Matches(msg, m.keyMap.Down):
+		case key.Matches(msg, MainKeyMap.Down):
 			if m.logsExpanded {
 				m.logsViewport.ScrollDown(1)
 			} else {
 				m.connectionTable.MoveDown(1)
 			}
 
-		case key.Matches(msg, m.keyMap.Connect):
+		case key.Matches(msg, MainKeyMap.Connect):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx >= len(m.connections) {
-				m.modalLayer = NewCollectionModal(m.config.FetchSSHConfig)
+				m.modalLayer = connectionmodal.NewConnectionModal(m.config.FetchSSHConfig)
 			} else if m.connections[selectedIdx].Online {
 				m.connections[selectedIdx].DropConnection()
 			} else {
 				selectedConnection := m.connections[selectedIdx]
-				target := m.connectionTable.SelectedRow()[1]
-				if selectedConnection.SSHKey != "" {
-					target = "key " + filepath.Base(selectedConnection.SSHKey)
+				targets := make([]string, len(selectedConnection.Hosts))
+				for i, host := range selectedConnection.Hosts {
+					if host.SSHKey == "" {
+						targets[i] = host.Address() + ": "
+					} else {
+						targets[i] = "Key " + filepath.Base(host.SSHKey) + ": "
+					}
 				}
-				m.modalLayer = NewPasswordModal(target, selectedConnection.UID)
+				m.modalLayer = passwordmodal.NewPasswordModal(selectedConnection.UID, targets)
 			}
 
-		case key.Matches(msg, m.keyMap.Disconnect):
+		case key.Matches(msg, MainKeyMap.DeleteConnection):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx < len(m.connections) {
 				if m.connections[selectedIdx].Online {
-					m.modalLayer = NewErrorModal("Delete Error", "You cannot delete a config while it is connected.\nIf you are sure you want to delete this connection, disconnect it first.")
+					m.modalLayer = errormodal.NewErrorModal("Delete Error", "You cannot delete a config while it is connected.\nIf you are sure you want to delete this connection, disconnect it first.")
 				} else {
 					m.connections = slices.Delete(m.connections, selectedIdx, selectedIdx+1)
 					m.updateTableRows()
 				}
 			}
 
-		case key.Matches(msg, m.keyMap.ForwardLocal):
+		case key.Matches(msg, MainKeyMap.ForwardLocal):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx < len(m.connections) {
-				m.modalLayer = NewLocalForwardingModal(m.connections[selectedIdx].LocalForwards)
+				m.modalLayer = portforwardmodal.NewLocalForwardingModal(m.connections[selectedIdx].LocalForwards)
 			}
 
-		case key.Matches(msg, m.keyMap.ForwardRemote):
+		case key.Matches(msg, MainKeyMap.ForwardRemote):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx < len(m.connections) {
-				m.modalLayer = NewRemoteForwardingModal(m.connections[selectedIdx].RemoteForwards)
+				m.modalLayer = portforwardmodal.NewRemoteForwardingModal(m.connections[selectedIdx].RemoteForwards)
 			}
 
-		case key.Matches(msg, m.keyMap.ExpandLogs):
+		case key.Matches(msg, MainKeyMap.ExpandLogs):
 			m.logsExpanded = !m.logsExpanded
 
-		case key.Matches(msg, m.keyMap.Cancel):
+		case key.Matches(msg, MainKeyMap.Cancel):
 			m.logsExpanded = false
 		}
 
@@ -252,18 +263,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.getLogMessage
 		}
 
-	case connectionRow:
+	case connectiontable.ConnectionRow:
 		m.connections = append(m.connections, msg)
 		m.updateTableRows()
 
-	case PasswordMessage:
-		idx := slices.IndexFunc(m.connections, func(c connectionRow) bool { return c.UID == msg.ConnectionID })
+	case passwordmodal.PasswordMessage:
+		idx := slices.IndexFunc(m.connections, func(c connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
 		if idx < 0 {
-			m.modalLayer = NewErrorModal("Error", "got password for unknown connection")
+			m.modalLayer = errormodal.NewErrorModal("Error", "got password for unknown connection")
 			return m, nil
 		}
 		row := m.connections[idx]
-		connection := row.MakeConnection(msg.Password)
+		connection := row.MakeConnection(msg.Passwords)
 		ctx, dropCallback := context.WithCancel(m.ctx)
 		m.connections[idx].DropConnection = dropCallback
 		errCh := make(chan error)
@@ -284,90 +295,97 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case ConnectionEstablished:
-		for i, row := range m.connections {
-			if row.UID == uint32(msg) {
-				m.connections[i].Online = true
-				m.updateTableRows()
-				return m, nil
-			}
+		row := m.getConnectionByUID(uint32(msg))
+		if row != nil {
+			row.Online = true
+			m.updateTableRows()
+			return m, nil
 		}
 
 	case ConnectionDropped:
-		for i, row := range m.connections {
-			if row.UID == uint32(msg) {
-				m.connections[i].Online = false
-				m.updateTableRows()
-				return m, nil
-			}
+		row := m.getConnectionByUID(uint32(msg))
+		if row != nil {
+			row.Online = false
+			m.updateTableRows()
+			return m, nil
 		}
 
-	case NewLocalForward:
+	case portforwardmodal.NewLocalForward:
 		idx := m.connectionTable.Cursor()
 		if idx >= len(m.connections) {
 			return m, nil
 		}
 		arr := m.connections[idx].LocalForwards
-		display, backend := NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		display, backend := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
 		arr = append(arr, display)
 		go func() { m.connections[idx].NewLocalForwards <- backend }()
-		m.modalLayer = NewLocalForwardingModal(arr)
+		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].LocalForwards = arr
 		m.updateTableRows()
 
-	case DeleteLocalForward:
+	case portforwardmodal.DeleteLocalForward:
 		idx := m.connectionTable.Cursor()
 		if idx >= len(m.connections) {
 			return m, nil
 		}
 		portIdx := int(msg)
 		arr := m.connections[idx].LocalForwards
-		arr[portIdx].stopCallback()
+		arr[portIdx].StopCallback()
 		arr = slices.Delete(arr, portIdx, portIdx+1)
-		m.modalLayer = NewLocalForwardingModal(arr)
+		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].LocalForwards = arr
 		m.updateTableRows()
 
-	case NewRemoteForward:
+	case portforwardmodal.NewRemoteForward:
 		idx := m.connectionTable.Cursor()
 		if idx >= len(m.connections) {
 			return m, nil
 		}
 		arr := m.connections[idx].RemoteForwards
-		display, backend := NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		display, backend := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
 		arr = append(arr, display)
 		go func() { m.connections[idx].NewRemoteForwards <- backend }()
-		m.modalLayer = NewLocalForwardingModal(arr)
+		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
 
-	case DeleteRemoteForward:
+	case portforwardmodal.DeleteRemoteForward:
 		idx := m.connectionTable.Cursor()
 		if idx >= len(m.connections) {
 			return m, nil
 		}
 		portIdx := int(msg)
 		arr := m.connections[idx].RemoteForwards
-		arr[portIdx].stopCallback()
+		arr[portIdx].StopCallback()
 		arr = slices.Delete(arr, portIdx, portIdx+1)
-		m.modalLayer = NewLocalForwardingModal(arr)
+		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
 
 	case Error:
-		m.modalLayer = NewErrorModal(msg.Title, msg.Err.Error())
+		m.modalLayer = errormodal.NewErrorModal(msg.Title, msg.Err.Error())
 		return m, nil
 	}
 
 	return m, nil
 }
 
+func (m *Model) getConnectionByUID(uid uint32) *connectiontable.ConnectionRow {
+	for idx, conn := range m.connections {
+		if conn.UID == uid {
+			return &m.connections[idx]
+		}
+	}
+	return nil
+}
+
 func (m *Model) updateTableRows() {
-	m.connectionTable.SetRows(tableRows(m.connections))
+	m.connectionTable.SetRows(connectiontable.TableRows(m.connections))
 }
 
 func (m *Model) View() tea.View {
 	if m.ctx.Err() != nil {
-		return tea.NewView("Goodbye from switchboard!\n")
+		return tea.NewView("")
 	}
 
 	// View Setup
@@ -399,7 +417,7 @@ func (m *Model) View() tea.View {
 }
 
 func (m Model) showFullLogs() string {
-	frame := Frame{
+	frame := components.Frame{
 		Title:  "Logs",
 		Width:  m.viewportWidth,
 		Height: m.viewportHeight,
@@ -418,19 +436,19 @@ func (m Model) mainContent() string {
 	connectionsFrameHeight := max(6, min(20, m.viewportHeight-1-logsFrameDefaultHeight))
 	logsFrameHeight := max(3, m.viewportHeight-connectionsFrameHeight-1)
 
-	connectionsFrame := Frame{
+	connectionsFrame := components.Frame{
 		Title:  "Active Connections",
 		Width:  m.viewportWidth,
 		Height: connectionsFrameHeight,
 	}
 
-	m.connectionTable.SetColumns(makeColumns(connectionsFrame.InnerWidth()))
+	m.connectionTable.SetColumns(connectiontable.MakeColumns(connectionsFrame.InnerWidth()))
 	m.connectionTable.SetWidth(connectionsFrame.InnerWidth())
 	m.connectionTable.SetHeight(connectionsFrame.InnerHeight())
 
 	fmt.Fprintln(&content, connectionsFrame.Render(m.connectionTable.View()))
 
-	logsFrame := Frame{
+	logsFrame := components.Frame{
 		Title:  "Logs",
 		Width:  m.viewportWidth,
 		Height: logsFrameHeight,
@@ -444,37 +462,7 @@ func (m Model) mainContent() string {
 	}
 
 	fmt.Fprintln(&content, logsFrame.Render(strings.Trim(logs.String(), "\n")))
-	fmt.Fprintln(&content, m.help.View(m.keyMap))
+	fmt.Fprintln(&content, m.help.View(MainKeyMap))
 
 	return content.String()
-}
-
-type Frame struct {
-	Title    string
-	Width    int
-	Height   int
-	PaddingX int
-	PaddingY int
-}
-
-func (f Frame) InnerWidth() int {
-	return f.Width - 2 - (2 * f.PaddingX)
-}
-
-func (f Frame) InnerHeight() int {
-	return f.Height - 2 - (2 * f.PaddingY)
-}
-
-func (f Frame) Render(content string) string {
-	titleContent := style.Header.Padding(0, 1).Render(f.Title)
-
-	sizedContent := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder(), true).
-		Padding(f.PaddingY, f.PaddingX).
-		Render(lipgloss.Place(f.InnerWidth(), f.InnerHeight(), lipgloss.Top, lipgloss.Left, content))
-
-	return lipgloss.NewCompositor(
-		lipgloss.NewLayer(titleContent).X(2).Z(1),
-		lipgloss.NewLayer(sizedContent),
-	).Render()
 }

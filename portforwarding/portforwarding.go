@@ -19,10 +19,29 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type ConnectionHost struct {
+	User string // user to authenticate as
+	Auth AuthMethod
+	Host string // in the form HOST:PORT
+}
+
+func (h ConnectionHost) AsConfig(hostKeyAlgorithms []string, hostKeyCB ssh.HostKeyCallback) (ssh.ClientConfig, error) {
+	auth, err := h.Auth.Create()
+	if err != nil {
+		return ssh.ClientConfig{}, err
+	}
+
+	return ssh.ClientConfig{
+		User:              h.User,
+		Auth:              []ssh.AuthMethod{auth},
+		HostKeyCallback:   hostKeyCB,
+		Timeout:           60 * time.Second,
+		HostKeyAlgorithms: hostKeyAlgorithms,
+	}, nil
+}
+
 type Connection struct {
-	User           string // user to authenticate as
-	Auth           AuthMethod
-	Host           string // in the form HOST:PORT
+	Hosts          []ConnectionHost // a list of jump hosts leading to the endpoint: the last element
 	LocalForwards  <-chan PortForward
 	RemoteForwards <-chan PortForward
 }
@@ -87,9 +106,35 @@ func ConnectToClient(
 	msgs messaging.Tx,
 	conn Connection,
 ) error {
-	innerKnownHostsCallback, err := knownhosts.New(cfg.KnownHostsFile)
+	if len(conn.Hosts) == 0 {
+		return fmt.Errorf("list of hosts cannot be empty")
+	}
+
+	hostKeyCB, err := hostKeyCB(cfg.KnownHostsFile, msgs)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to create host key callback: %w", err)
+	}
+
+	var client *ssh.Client
+	for _, host := range conn.Hosts {
+		config, err := host.AsConfig(cfg.HostKeyAlgorithms, hostKeyCB)
+		if err != nil {
+			return fmt.Errorf("unable to connect to client %s@%s: %w", host.User, host.Host, err)
+		}
+		client, err = jumpToHost(client, &config, host)
+		if err != nil {
+			return fmt.Errorf("unable to connect to SSH server %s@%s: %w", host.User, host.Host, err)
+		}
+	}
+
+	go mainLoop(ctx, errCh, msgs, client, conn)
+	return nil
+}
+
+func hostKeyCB(knownHostsFile string, msgs messaging.Tx) (ssh.HostKeyCallback, error) {
+	innerKnownHostsCallback, err := knownhosts.New(knownHostsFile)
+	if err != nil {
+		return nil, err
 	}
 	hostKeyCB := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		err := innerKnownHostsCallback(hostname, remote, key)
@@ -106,27 +151,23 @@ func ConnectToClient(
 		return err
 	}
 
-	authMethod, err := conn.Auth.Create()
+	return hostKeyCB, nil
+}
+
+func jumpToHost(client *ssh.Client, config *ssh.ClientConfig, host ConnectionHost) (*ssh.Client, error) {
+	if client == nil {
+		return ssh.Dial("tcp", host.Host, config)
+	}
+
+	rawConn, err := client.Dial("tcp", host.Host)
 	if err != nil {
-		return fmt.Errorf("unable to generate auth: %w", err)
+		return nil, fmt.Errorf("unable to dial target host from jump host: %w", err)
 	}
-
-	config := &ssh.ClientConfig{
-		User:              conn.User,
-		Auth:              []ssh.AuthMethod{authMethod},
-		HostKeyCallback:   hostKeyCB,
-		Timeout:           60 * time.Second,
-		HostKeyAlgorithms: cfg.HostKeyAlgorithms,
-	}
-
-	// Connect to the remote server and perform the SSH handshake.
-	client, err := ssh.Dial("tcp", conn.Host, config)
+	sshConn, newChannelCh, sshRequestCh, err := ssh.NewClientConn(rawConn, host.Host, config)
 	if err != nil {
-		return fmt.Errorf("unable to connect to SSH server %s@%s: %v", conn.User, conn.Host, err)
+		return nil, fmt.Errorf("unable to create client connection for target: %w", err)
 	}
-
-	go mainLoop(ctx, errCh, msgs, client, conn)
-	return nil
+	return ssh.NewClient(sshConn, newChannelCh, sshRequestCh), nil
 }
 
 func keyTypes(keys []knownhosts.KnownKey) []string {
@@ -146,8 +187,9 @@ func mainLoop(
 ) {
 	defer client.Close()
 
-	msgs.Infof("Established connection to %s@%s", conn.User, conn.Host)
-	defer msgs.Infof("Closed connection to %s@%s", conn.User, conn.Host)
+	host := conn.Hosts[len(conn.Hosts)-1]
+	msgs.Infof("Established connection to %s@%s", host.User, host.Host)
+	defer msgs.Infof("Closed connection to %s@%s", host.User, host.Host)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -156,7 +198,7 @@ func mainLoop(
 		case <-ctx.Done():
 			err := eg.Wait()
 			if err != nil {
-				msgs.Errorf("connection %s@%s broken: %v", conn.User, conn.Host, err)
+				msgs.Errorf("connection %s@%s broken: %v", host.User, host.Host, err)
 			}
 			// Push to the err channel to inform the UI that we disconnected
 			errCh <- err

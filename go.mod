@@ -11,7 +11,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.52.0
 	golang.org/x/sync v0.20.0
-	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -32,7 +31,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
