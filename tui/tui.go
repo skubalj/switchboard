@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -20,8 +19,8 @@ import (
 	"github.com/skubalj/switchboard/tui/components"
 	"github.com/skubalj/switchboard/tui/connectiontable"
 	"github.com/skubalj/switchboard/tui/modal"
-	"github.com/skubalj/switchboard/tui/modal/connectionmodal"
 	"github.com/skubalj/switchboard/tui/modal/errormodal"
+	"github.com/skubalj/switchboard/tui/modal/hostsmodal"
 	"github.com/skubalj/switchboard/tui/modal/passwordmodal"
 	"github.com/skubalj/switchboard/tui/modal/portforwardmodal"
 )
@@ -121,10 +120,6 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 type LogMessage string
 type ConnectionEstablished uint32
 type ConnectionDropped uint32
-type Error struct {
-	Title string
-	Err   error
-}
 
 func (m *Model) Init() tea.Cmd {
 	return m.getLogMessage
@@ -206,7 +201,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, MainKeyMap.Connect):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx >= len(m.connections) {
-				m.modalLayer = connectionmodal.NewConnectionModal(m.config.FetchSSHConfig)
+				m.modalLayer = hostsmodal.NewHostsModal(nil, m.config.FetchSSHConfig)
+				// m.modalLayer = connectionmodal.NewConnectionModal(m.config.FetchSSHConfig)
 			} else if m.connections[selectedIdx].Online {
 				m.connections[selectedIdx].DropConnection()
 			} else {
@@ -216,7 +212,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if host.SSHKey == "" {
 						targets[i] = host.Address() + ": "
 					} else {
-						targets[i] = "Key " + filepath.Base(host.SSHKey) + ": "
+						targets[i] = "Key " + host.SSHKey + ": "
 					}
 				}
 				m.modalLayer = passwordmodal.NewPasswordModal(selectedConnection.UID, targets)
@@ -288,7 +284,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			func() tea.Msg {
 				err := portforwarding.ConnectToClient(ctx, m.config, errCh, m.msgTx, connection)
 				if err != nil {
-					return Error{"Connection Error", err}
+					return errormodal.ErrorMsg{Title: "Connection Error", Err: err}
 				}
 				return ConnectionEstablished(row.UID)
 			},
@@ -362,7 +358,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
 
-	case Error:
+	case errormodal.ErrorMsg:
 		m.modalLayer = errormodal.NewErrorModal(msg.Title, msg.Err.Error())
 		return m, nil
 	}

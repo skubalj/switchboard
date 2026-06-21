@@ -72,7 +72,7 @@ func newLocalForwardingTable(forwards []PortForward) table.Model {
 func makeLocalForwardingColumns(width int) []table.Column {
 	width -= 8
 	dividedWidth := width / 4
-	remainder := width % dividedWidth
+	remainder := width % 4
 
 	return []table.Column{
 		{Title: "Local Bind Address", Width: dividedWidth + remainder},

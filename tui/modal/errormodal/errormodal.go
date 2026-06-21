@@ -14,6 +14,11 @@ type ErrorModal struct {
 	Content string
 }
 
+type ErrorMsg struct {
+	Title string
+	Err   error
+}
+
 func NewErrorModal(title, content string) modal.Window {
 	return &ErrorModal{Title: title, Content: content}
 }

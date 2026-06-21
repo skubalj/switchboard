@@ -1,6 +1,7 @@
 package connectionmodal
 
 import (
+	"fmt"
 	"os/user"
 	"strconv"
 
@@ -13,8 +14,10 @@ import (
 )
 
 type ConnectionModal struct {
-	configLookup configLookup
-	inner        *textinputmodal.TextInputModal
+	configLookup  configLookup
+	defaultInputs []textinputmodal.TextInput
+	selectedModal int
+	inner         []textinputmodal.TextInputModal
 }
 
 type configLookup = func(string) (config.Host, error)
@@ -23,6 +26,14 @@ const (
 	LoadButton = "Load From Config"
 	Save       = "Save"
 	Cancel     = "Cancel"
+)
+
+const (
+	nameIdx = iota
+	userIdx
+	hostIdx
+	portIdx
+	sshKeyIdx
 )
 
 func NewConnectionModal(configLookup configLookup) *ConnectionModal {
@@ -43,67 +54,67 @@ func NewConnectionModal(configLookup configLookup) *ConnectionModal {
 	}
 
 	innerModal := textinputmodal.NewTextInputModal("New Connection", inputs, []string{LoadButton, Save, Cancel})
-	return &ConnectionModal{configLookup: configLookup, inner: &innerModal}
+	return &ConnectionModal{
+		configLookup:  configLookup,
+		defaultInputs: inputs,
+		inner:         []textinputmodal.TextInputModal{innerModal},
+	}
 }
 
-func (m *ConnectionModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
-	button, state := m.inner.Update(msg)
+func (m *ConnectionModal) Update(msg tea.Msg) (*ConnectionModal, connectiontable.ConnectionHost, tea.Cmd) {
+	button, state := m.inner[m.selectedModal].Update(msg)
 	switch state {
 	case textinputmodal.Ok:
 		switch button {
 		case LoadButton:
 			m.setFromConfig()
 		case Save:
-			values := m.inner.GetValues()
-			name := values[0]
-			user := values[1]
-			host := values[2]
-			portString := values[3]
-			sshKey := values[4]
-
-			port, err := strconv.ParseUint(portString, 10, 16)
+			values := m.inner[m.selectedModal].GetValues()
+			port, err := strconv.ParseUint(values[portIdx], 10, 16)
 			if err != nil {
-				return errormodal.NewErrorModal("Error", "port must be a number"), nil
+				return nil, connectiontable.ConnectionHost{}, func() tea.Msg {
+					return errormodal.ErrorMsg{
+						Title: "Error",
+						Err:   fmt.Errorf("port must be a number"),
+					}
+				}
 			}
 
-			return nil, func() tea.Msg {
-				return connectiontable.NewConnectionRow(name, []connectiontable.ConnectionHost{
-					{
-						User:   user,
-						Host:   host,
-						Port:   uint16(port),
-						SSHKey: sshKey,
-					},
-				})
-			}
+			return nil, connectiontable.ConnectionHost{
+				User:   values[userIdx],
+				Host:   values[hostIdx],
+				Port:   uint16(port),
+				SSHKey: values[sshKeyIdx],
+			}, nil
+
 		case Cancel:
-			return nil, nil
+			return nil, connectiontable.ConnectionHost{}, nil
 		}
 	case textinputmodal.Cancel:
-		return nil, nil
+		return nil, connectiontable.ConnectionHost{}, nil
 	case textinputmodal.Quit:
-		return nil, tea.Quit
+		return nil, connectiontable.ConnectionHost{}, tea.Quit
 	}
 
-	return m, nil
+	return m, connectiontable.ConnectionHost{}, nil
 }
 
 func (m *ConnectionModal) setFromConfig() {
-	values := m.inner.GetValues()
+	values := m.inner[m.selectedModal].GetValues()
 
-	host, err := m.configLookup(values[0])
+	host, err := m.configLookup(values[nameIdx])
 	if err != nil {
-		m.inner.SetError(err.Error())
+		m.inner[m.selectedModal].SetError(err.Error())
 		return
 	}
 
-	values[1] = host.User
-	values[2] = host.Host
-	values[3] = strconv.Itoa(int(host.Port))
-	values[4] = host.IdentityFile
-	m.inner.SetInputs(values)
+	values[userIdx] = host.User
+	values[hostIdx] = host.Host
+	values[portIdx] = strconv.Itoa(int(host.Port))
+	values[sshKeyIdx] = host.IdentityFile
+	m.inner[m.selectedModal].SetInputs(values)
 }
 
 func (m *ConnectionModal) Render() modal.ContentBlock {
-	return m.inner.Render()
+	return m.inner[m.selectedModal].Render()
 }
