@@ -8,20 +8,36 @@ import (
 
 type PasswordModal struct {
 	connectionID uint32
+	indexMap     []int
 	inner        textinputmodal.TextInputModal
 }
 
 func NewPasswordModal(connID uint32, targetStrings []string) modal.Window {
 	inputs := make([]textinputmodal.TextInput, 0, len(targetStrings))
-	for _, str := range targetStrings {
-		inputs = append(inputs, textinputmodal.TextInput{
-			Prompt:      str,
-			IsPassword:  true,
-		})
+	indexMap := make([]int, len(targetStrings))
+	inputsSet := make(map[string]int, len(targetStrings))
+	for idx, str := range targetStrings {
+		val, ok := inputsSet[str]
+		if !ok {
+			inputsSet[str] = idx
+			indexMap[idx] = idx
+			inputs = append(inputs, textinputmodal.TextInput{
+				Prompt:     str,
+				IsPassword: true,
+			})
+		} else {
+			// If we have already seen this input, reference the existing input we made for it
+			indexMap[idx] = val
+		}
+
 	}
 
 	inner := textinputmodal.NewTextInputModal("Enter Password", inputs, []string{"OK", "Cancel"})
-	return &PasswordModal{connectionID: connID, inner: inner}
+	return &PasswordModal{
+		connectionID: connID,
+		indexMap:     indexMap,
+		inner:        inner,
+	}
 }
 
 type PasswordMessage struct {
@@ -35,7 +51,7 @@ func (m *PasswordModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	case textinputmodal.Ok:
 		switch button {
 		case "OK":
-			passwords := m.inner.GetValues()
+			passwords := m.buildPasswordList()
 			return nil, func() tea.Msg {
 				return PasswordMessage{
 					ConnectionID: m.connectionID,
@@ -56,6 +72,15 @@ func (m *PasswordModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	return m, nil
 }
 
-func (m PasswordModal) Render() modal.ContentBlock {
+func (m *PasswordModal) buildPasswordList() []string {
+	passwords := m.inner.GetValues()
+	expandedList := make([]string, len(m.indexMap))
+	for i, j := range m.indexMap {
+		expandedList[i] = passwords[j]
+	}
+	return expandedList
+}
+
+func (m *PasswordModal) Render() modal.ContentBlock {
 	return m.inner.Render()
 }
