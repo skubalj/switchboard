@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -31,6 +32,7 @@ type Model struct {
 	ctxCancel   func()
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
+	logFileCh   chan string
 	connections []connectiontable.ConnectionRow
 	config      config.Config
 
@@ -91,9 +93,20 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	panic("unimplemented")
 }
 
-func InitialModel(verbose bool, cfg config.Config) tea.Model {
-	ctx, cancel := context.WithCancel(context.TODO())
-	tx, rx := messaging.NewChannels()
+func InitialModel(logConfig config.LogConfig, cfg config.Config) *Model {
+	ctx, cancel := context.WithCancel(context.Background())
+	tx, rx := messaging.NewChannels(logConfig.Level())
+
+	var logFileCh chan string
+	if logConfig.LogFile != "" {
+		f, err := os.Create(logConfig.LogFile)
+		if err != nil {
+			tx.SendError(fmt.Errorf("unable to open log file '%s': %w", logConfig.LogFile, err))
+		} else {
+			logFileCh = make(chan string)
+			go writeLogFile(logFileCh, f)
+		}
+	}
 
 	connections := make([]connectiontable.ConnectionRow, 0, len(cfg.Connections))
 	for _, conn := range cfg.Connections {
@@ -105,6 +118,7 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 		ctxCancel:       cancel,
 		msgTx:           tx,
 		msgRx:           rx,
+		logFileCh:       logFileCh,
 		connections:     connections,
 		config:          cfg,
 		help:            help.New(),
@@ -117,7 +131,6 @@ func InitialModel(verbose bool, cfg config.Config) tea.Model {
 	return modal
 }
 
-type LogMessage string
 type ConnectionEstablished uint32
 type ConnectionDropped uint32
 
@@ -125,8 +138,15 @@ func (m *Model) Init() tea.Cmd {
 	return m.getLogMessage
 }
 
+func (m *Model) Close() {
+	m.msgTx.Close()
+	if m.logFileCh != nil {
+		close(m.logFileCh)
+	}
+}
+
 func (m *Model) getLogMessage() tea.Msg {
-	return LogMessage(m.msgRx.NextMessage(m.ctx))
+	return m.msgRx.NextMessage(m.ctx)
 }
 
 func (m *Model) GetConfigConnections() []config.Connection {
@@ -248,13 +268,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logsExpanded = false
 		}
 
-	case LogMessage:
-		if msg != "" {
-			m.logs = m.logs.Append(string(msg))
+	case messaging.Message:
+		if !msg.IsZero() {
+			m.logs = m.logs.Append(msg.FormatMessage())
 			lines := m.logs.AsSlice()
 			m.logsViewport.SetContentLines(lines)
 			if !m.logsExpanded {
 				m.logsViewport.SetYOffset(max(0, len(lines)-m.viewportHeight+2))
+			}
+			if m.logFileCh != nil {
+				m.logFileCh <- msg.FormatMessageNoColor()
 			}
 			return m, m.getLogMessage
 		}
@@ -461,4 +484,11 @@ func (m Model) mainContent() string {
 	fmt.Fprintln(&content, lipgloss.NewStyle().Padding(0, 1).Render(m.help.View(MainKeyMap)))
 
 	return content.String()
+}
+
+func writeLogFile(rx <-chan string, file *os.File) {
+	defer file.Close()
+	for line := range rx {
+		fmt.Fprintln(file, line)
+	}
 }

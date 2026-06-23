@@ -142,10 +142,10 @@ func hostKeyCB(knownHostsFile string, msgs messaging.Tx) (ssh.HostKeyCallback, e
 			typed, ok := err.(*knownhosts.KeyError)
 			if ok {
 				msgs.Errorf("key for host '%s' with type '%s' not found in known_hosts file -- connect with ssh to save the key", hostname, key.Type())
-				msgs.Debugf("found %d keys for host '%s' with types: %s", len(typed.Want), hostname, strings.Join(keyTypes(typed.Want), ", "))
+				msgs.Tracef("found %d keys for host '%s' with types: %s", len(typed.Want), hostname, strings.Join(keyTypes(typed.Want), ", "))
 			}
 		} else {
-			msgs.Debugf("verified host '%s' with %s key", hostname, key.Type())
+			msgs.Tracef("verified host '%s' with %s key", hostname, key.Type())
 		}
 
 		return err
@@ -214,7 +214,7 @@ func mainLoop(
 // Connections to the given TCP port on the local (client) host are to be forwarded to the given host and port
 func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
 	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
-		msgs.Debugf("skipping closed forward from local address '%s' to remote address '%s'", addresses.LocalAddr.String(), addresses.RemoteAddr.String())
+		msgs.Tracef("skipping closed forward from local address '%s' to remote address '%s'", addresses.LocalAddr.String(), addresses.RemoteAddr.String())
 		return nil
 	}
 
@@ -244,11 +244,11 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 		} else if err != nil {
 			return fmt.Errorf("listener closed: %w", err)
 		}
-		msgs.Debugf("New connection to local port %s", addresses.LocalAddr)
+		msgs.Tracef("New connection to local port %s", addresses.LocalAddr)
 
 		go func() {
 			defer localConn.Close()
-			defer msgs.Debugf("Connection to local port %s closed", addresses.LocalAddr)
+			defer msgs.Tracef("Connection to local port %s closed", addresses.LocalAddr)
 
 			remoteConn, err := client.Dial("tcp", addresses.RemoteAddr.String())
 			if err != nil {
@@ -269,7 +269,7 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 // Connections to the given TCP port on the remote (server) host are to be forwarded to the local side
 func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
 	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
-		msgs.Debugf("skipping closed forward from remote address '%s' to local address '%s'", addresses.RemoteAddr.String(), addresses.LocalAddr.String())
+		msgs.Tracef("skipping closed forward from remote address '%s' to local address '%s'", addresses.RemoteAddr.String(), addresses.LocalAddr.String())
 		return nil
 	}
 
@@ -296,11 +296,11 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 		} else if err != nil {
 			return fmt.Errorf("listener closed: %w", err)
 		}
-		msgs.Debugf("New connection to remote port %s", addresses.RemoteAddr)
+		msgs.Tracef("New connection to remote port %s", addresses.RemoteAddr)
 
 		go func() {
 			defer remoteConn.Close()
-			defer msgs.Debugf("Connection to remote port %s closed", addresses.RemoteAddr)
+			defer msgs.Tracef("Connection to remote port %s closed", addresses.RemoteAddr)
 
 			localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr))
 			if err != nil {

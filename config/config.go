@@ -180,3 +180,16 @@ func (cfg Config) FetchSSHConfig(host string) ([]Host, error) {
 
 	return hostsList, nil
 }
+
+type LogConfig struct {
+	Quiet   bool
+	LogFile string
+}
+
+func (c LogConfig) Level() slog.Level {
+	if c.Quiet {
+		return slog.LevelInfo
+	} else {
+		return slog.LevelDebug
+	}
+}

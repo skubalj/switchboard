@@ -19,9 +19,10 @@ type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`
 	SetConfig *setConfigSubcommand `arg:"subcommand:set-config" help:"set values in the config file"`
 
-	ConfigFile string `arg:"--config-file" help:"override the switchboard config file [default: ~/.ssh/switchboard.json]"`
-	Verbose    bool   `arg:"-v,--verbose" help:"show additional logging"`
+	ConfigFile string `arg:"--config-file" placeholder:"CONFIG_FILE" help:"override the switchboard config file [default: ~/.ssh/switchboard.json]"`
 	Copyright  bool   `arg:"--copyright" help:"display GPL copyright notice"`
+	LogFile    string `arg:"--log-file" placeholder:"LOG_FILE" help:"write logs to the given path"`
+	Quiet      bool   `arg:"-q,--quiet" help:"do not show trace logging"`
 }
 
 func (Args) Epilogue() string {
@@ -33,6 +34,10 @@ func (Args) Version() string {
 	return fmt.Sprintf(`switchboard %s
 Copyright (C) 2026 Joseph Skubal
 This program is free software released under the GNU GPLv3`, versionString)
+}
+
+func (a Args) LogConfig() config.LogConfig {
+	return config.LogConfig{Quiet: a.Quiet, LogFile: a.LogFile}
 }
 
 const gplCopyrightNotice = `switchboard: SSH Port Forwarding Interface
@@ -122,7 +127,8 @@ func main() {
 	} else if args.Copyright {
 		fmt.Println(gplCopyrightNotice)
 	} else {
-		err = mainCommand(args.Verbose, configFilePath)
+		err = mainCommand(args.LogConfig(), configFilePath)
+		defer fmt.Println("Goodbye from switchboard!")
 	}
 
 	if err != nil {
@@ -131,7 +137,7 @@ func main() {
 	}
 }
 
-func mainCommand(verbose bool, configFilePath string) error {
+func mainCommand(logConfig config.LogConfig, configFilePath string) error {
 	// Read config file, or generate default
 	cfg, err := config.GetConfig(configFilePath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -143,12 +149,14 @@ func mainCommand(verbose bool, configFilePath string) error {
 		return fmt.Errorf("unable to open config file: %w", err)
 	}
 
-	p := tea.NewProgram(tui.InitialModel(verbose, cfg))
-	model, err := p.Run()
+	model := tui.InitialModel(logConfig, cfg)
+	defer model.Close()
+	p := tea.NewProgram(model)
+	_, err = p.Run()
 	if err != nil {
 		return err
 	}
 
-	cfg.Connections = model.(*tui.Model).GetConfigConnections()
+	cfg.Connections = model.GetConfigConnections()
 	return config.SaveConfig(configFilePath, cfg)
 }
