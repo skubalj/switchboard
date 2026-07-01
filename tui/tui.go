@@ -24,6 +24,7 @@ import (
 	"github.com/skubalj/switchboard/tui/modal/hostsmodal"
 	"github.com/skubalj/switchboard/tui/modal/passwordmodal"
 	"github.com/skubalj/switchboard/tui/modal/portforwardmodal"
+	"github.com/skubalj/switchboard/tui/utils"
 )
 
 type Model struct {
@@ -52,6 +53,8 @@ type keyMap struct {
 	Down             key.Binding
 	Connect          key.Binding
 	DeleteConnection key.Binding
+	ReorderUp        key.Binding
+	ReorderDown      key.Binding
 	ExpandLogs       key.Binding
 	ForwardLocal     key.Binding
 	ForwardRemote    key.Binding
@@ -64,6 +67,8 @@ var MainKeyMap = keyMap{
 	Down:             key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
 	Connect:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Disconnect")),
 	DeleteConnection: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Remove Connection")),
+	ReorderUp:        key.NewBinding(key.WithKeys("pgup"), key.WithHelp("PgUp", "Reorder Up")),
+	ReorderDown:      key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("PgDown", "Reorder Down")),
 	ExpandLogs:       key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
 	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Local Forwards")),
 	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Remote Forwards")),
@@ -77,6 +82,8 @@ func (k keyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Up,
 		k.Down,
+		k.ReorderUp,
+		k.ReorderDown,
 		k.Connect,
 		k.DeleteConnection,
 		k.ExpandLogs,
@@ -216,6 +223,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logsViewport.ScrollDown(1)
 			} else {
 				m.connectionTable.MoveDown(1)
+			}
+
+		case key.Matches(msg, MainKeyMap.ReorderUp):
+			if !m.logsExpanded && utils.ReorderUp(m.connections, m.connectionTable.Cursor()) {
+				m.connectionTable.MoveUp(1)
+				m.updateTableRows()
+			}
+
+		case key.Matches(msg, MainKeyMap.ReorderDown):
+			if !m.logsExpanded && utils.ReorderDown(m.connections, m.connectionTable.Cursor()) {
+				m.connectionTable.MoveDown(1)
+				m.updateTableRows()
 			}
 
 		case key.Matches(msg, MainKeyMap.Connect):

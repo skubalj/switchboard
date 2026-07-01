@@ -13,7 +13,7 @@ import (
 	"github.com/skubalj/switchboard/tui"
 )
 
-const versionString = "v0.1.0"
+const versionString = "v0.1.0-dev"
 
 type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`

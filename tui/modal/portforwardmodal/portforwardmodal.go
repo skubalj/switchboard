@@ -11,6 +11,7 @@ import (
 	"github.com/skubalj/switchboard/tui/modal"
 	"github.com/skubalj/switchboard/tui/modal/errormodal"
 	"github.com/skubalj/switchboard/tui/style"
+	"github.com/skubalj/switchboard/tui/utils"
 )
 
 type NewLocalForward config.PortForward
@@ -65,6 +66,16 @@ func (m *PortForwardingModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 					return nil, func() tea.Msg { return DeleteRemoteForward(idx) }
 				}
 			}
+		case "pgup":
+			if utils.ReorderUp(m.portForwards, m.tableState.Cursor()) {
+				m.tableState.MoveUp(1)
+				m.updateTable()
+			}
+		case "pgdown":
+			if utils.ReorderDown(m.portForwards, m.tableState.Cursor()) {
+				m.tableState.MoveDown(1)
+				m.updateTable()
+			}
 		case "up":
 			m.tableState.MoveUp(1)
 		case "down":
@@ -76,7 +87,15 @@ func (m *PortForwardingModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	return m, nil
 }
 
-func (m PortForwardingModal) Render() modal.ContentBlock {
+func (m *PortForwardingModal) updateTable() {
+	if m.isLocal {
+		m.tableState.SetRows(makeLocalForwardingRows(m.portForwards))
+	} else {
+		m.tableState.SetRows(makeRemoteForwardingRows(m.portForwards))
+	}
+}
+
+func (m *PortForwardingModal) Render() modal.ContentBlock {
 	title := "Remote Port Forwards"
 	if m.isLocal {
 		title = "Local Port Forwards"

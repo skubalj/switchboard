@@ -16,6 +16,7 @@ import (
 	"github.com/skubalj/switchboard/tui/modal"
 	"github.com/skubalj/switchboard/tui/modal/connectionmodal"
 	"github.com/skubalj/switchboard/tui/style"
+	"github.com/skubalj/switchboard/tui/utils"
 )
 
 type HostsModal struct {
@@ -96,22 +97,14 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 			}
 
 		case key.Matches(msg, hostModalKeyMap.ReorderUp):
-			if len(m.hosts) > 1 {
-				idx := m.tableState.Cursor()
-				if idx < len(m.hosts) && idx > 0 && len(m.hosts) > 1 {
-					m.hosts[idx], m.hosts[idx-1] = m.hosts[idx-1], m.hosts[idx]
-					m.tableState.MoveUp(1)
-				}
+			if utils.ReorderUp(m.hosts, m.tableState.Cursor()) {
+				m.tableState.MoveUp(1)
 				m.tableState.SetRows(makeRows(m.hosts))
 			}
 
 		case key.Matches(msg, hostModalKeyMap.ReorderDown):
-			if len(m.hosts) > 1 {
-				idx := m.tableState.Cursor()
-				if idx < len(m.hosts)-1 {
-					m.hosts[idx], m.hosts[idx+1] = m.hosts[idx+1], m.hosts[idx]
-					m.tableState.MoveDown(1)
-				}
+			if utils.ReorderDown(m.hosts, m.tableState.Cursor()) {
+				m.tableState.MoveDown(1)
 				m.tableState.SetRows(makeRows(m.hosts))
 			}
 

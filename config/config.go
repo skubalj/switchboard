@@ -133,7 +133,7 @@ func (cfg Config) FetchSSHConfig(host string) ([]Host, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to fetch current user: %w", err)
 		}
-		user = usr.Name
+		user = usr.Username
 	}
 
 	hostName, err := sshCfg.Get(host, "hostname")
