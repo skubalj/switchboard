@@ -13,7 +13,7 @@ import (
 	"github.com/skubalj/switchboard/tui"
 )
 
-const versionString = "v0.0.0-dev"
+const versionString = "v0.1.0"
 
 type Args struct {
 	GetConfig *getConfigSubcommand `arg:"subcommand:get-config" help:"print the config file"`
@@ -23,11 +23,6 @@ type Args struct {
 	Copyright  bool   `arg:"--copyright" help:"display GPL copyright notice"`
 	LogFile    string `arg:"--log-file" placeholder:"LOG_FILE" help:"write logs to the given path"`
 	Quiet      bool   `arg:"-q,--quiet" help:"do not show trace logging"`
-}
-
-func (Args) Epilogue() string {
-	return `This program is free software released under the GNU GPLv3
-Copyright (C) 2026 Joseph Skubal`
 }
 
 func (Args) Version() string {
