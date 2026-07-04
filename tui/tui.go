@@ -55,6 +55,7 @@ type keyMap struct {
 	DeleteConnection key.Binding
 	ReorderUp        key.Binding
 	ReorderDown      key.Binding
+	EditConnection   key.Binding
 	ExpandLogs       key.Binding
 	ForwardLocal     key.Binding
 	ForwardRemote    key.Binding
@@ -65,11 +66,12 @@ type keyMap struct {
 var MainKeyMap = keyMap{
 	Up:               key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "Up")),
 	Down:             key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "Down")),
-	Connect:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Connect/Disconnect")),
+	Connect:          key.NewBinding(key.WithKeys("space"), key.WithHelp("Space", "Connect/Disconnect")),
 	DeleteConnection: key.NewBinding(key.WithKeys("delete"), key.WithHelp("Delete", "Remove Connection")),
 	ReorderUp:        key.NewBinding(key.WithKeys("pgup"), key.WithHelp("PgUp", "Reorder Up")),
 	ReorderDown:      key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("PgDown", "Reorder Down")),
-	ExpandLogs:       key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
+	EditConnection:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Edit Connection")),
+	ExpandLogs:       key.NewBinding(key.WithKeys("f"), key.WithHelp("F", "Expand Logs")),
 	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Local Forwards")),
 	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Remote Forwards")),
 	Cancel:           key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
@@ -86,6 +88,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 		k.ReorderDown,
 		k.Connect,
 		k.DeleteConnection,
+		k.EditConnection,
 		k.ExpandLogs,
 		k.ForwardLocal,
 		k.ForwardRemote,
@@ -237,11 +240,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateTableRows()
 			}
 
+		case key.Matches(msg, MainKeyMap.EditConnection):
+			selectedIdx := m.connectionTable.Cursor()
+			if !m.logsExpanded {
+				if selectedIdx < len(m.connections) {
+					connection := m.connections[selectedIdx]
+					if connection.Online {
+						m.modalLayer = errormodal.NewErrorModal("Error", "You cannot edit a connection while it is active.\nDisconnect, then try again.")
+					} else {
+						m.modalLayer = hostsmodal.EditConnectionHostsModal(connection.Name, connection.Hosts, m.config.FetchSSHConfig)
+					}
+				} else {
+					m.modalLayer = hostsmodal.NewConnectionHostsModal(m.config.FetchSSHConfig)
+				}
+			}
+
 		case key.Matches(msg, MainKeyMap.Connect):
 			selectedIdx := m.connectionTable.Cursor()
 			if selectedIdx >= len(m.connections) {
-				m.modalLayer = hostsmodal.NewHostsModal(nil, m.config.FetchSSHConfig)
-				// m.modalLayer = connectionmodal.NewConnectionModal(m.config.FetchSSHConfig)
+				m.modalLayer = hostsmodal.NewConnectionHostsModal(m.config.FetchSSHConfig)
 			} else if m.connections[selectedIdx].Online {
 				m.connections[selectedIdx].DropConnection()
 			} else {
@@ -302,7 +319,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case connectiontable.ConnectionRow:
-		m.connections = append(m.connections, msg)
+		selectedIdx := m.connectionTable.Cursor()
+		if selectedIdx < len(m.connections) {
+			m.connections[selectedIdx] = msg
+		} else {
+			m.connections = append(m.connections, msg)
+		}
+
 		m.updateTableRows()
 
 	case passwordmodal.PasswordMessage:

@@ -29,12 +29,17 @@ type HostsModal struct {
 	subModal       *connectionmodal.ConnectionModal
 }
 
-func NewHostsModal(hosts []connectiontable.ConnectionHost, configLookup func(string) ([]config.Host, error)) modal.Window {
+func NewConnectionHostsModal(configLookup func(string) ([]config.Host, error)) modal.Window {
+	return EditConnectionHostsModal("", nil, configLookup)
+}
+
+func EditConnectionHostsModal(name string, hosts []connectiontable.ConnectionHost, configLookup func(string) ([]config.Host, error)) modal.Window {
 	connectionName := textinput.New()
 	connectionName.Prompt = "> "
 	connectionName.Focus()
 	connectionName.SetVirtualCursor(true)
 	connectionName.SetStyles(style.InputBox)
+	connectionName.SetValue(name)
 
 	tableState := table.New(
 		table.WithFocused(false),
@@ -58,7 +63,12 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 		if cmd != nil {
 			return nil, cmd
 		} else if host != nil {
-			m.hosts = append(m.hosts, *host)
+			selectedIdx := m.tableState.Cursor()
+			if selectedIdx < len(m.hosts) {
+				m.hosts[selectedIdx] = *host
+			} else {
+				m.hosts = append(m.hosts, *host)
+			}
 		}
 		m.subModal = modal
 		m.tableState.SetRows(makeRows(m.hosts))
@@ -77,7 +87,9 @@ func (m *HostsModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 		case key.Matches(msg, hostModalKeyMap.Apply):
 			switch m.selectedIdx {
 			case 1:
-				if m.tableState.Cursor() >= len(m.hosts) {
+				if m.tableState.Cursor() < len(m.hosts) {
+					m.subModal = connectionmodal.EditConnectionModal(m.hosts[m.tableState.Cursor()], m.configLookup)
+				} else {
 					m.subModal = connectionmodal.NewConnectionModal(m.configLookup)
 				}
 			case 2:

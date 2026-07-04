@@ -56,6 +56,7 @@ type TextInput struct {
 	Prompt      string
 	Placeholder string
 	IsPassword  bool
+	Value       string
 }
 
 func NewTextInputModal(title string, prompts []TextInput, buttons []string) TextInputModal {
@@ -69,6 +70,7 @@ func NewTextInputModal(title string, prompts []TextInput, buttons []string) Text
 		input := baseInput
 		input.Prompt = p.Prompt
 		input.Placeholder = p.Placeholder
+		input.SetValue(p.Value)
 		if p.IsPassword {
 			input.EchoMode = textinput.EchoPassword
 			input.EchoCharacter = '*'

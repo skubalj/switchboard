@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/user"
 	"strconv"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/skubalj/switchboard/config"
@@ -36,24 +37,46 @@ const (
 	sshKeyIdx
 )
 
-func NewConnectionModal(configLookup configLookup) *ConnectionModal {
-	var username string
-	{
+var username string
+var setUsernameOnce sync.Once
+
+func getUsername() string {
+	setUsernameOnce.Do(func() {
 		osUser, err := user.Current()
 		if err == nil {
 			username = osUser.Username
 		}
-	}
+	})
+	return username
+}
 
+func NewConnectionModal(configLookup configLookup) *ConnectionModal {
 	inputs := []textinputmodal.TextInput{
 		{Prompt: "Name: ", Placeholder: ""},
-		{Prompt: "User: ", Placeholder: username},
+		{Prompt: "User: ", Placeholder: getUsername()},
 		{Prompt: "Host: ", Placeholder: ""},
 		{Prompt: "Port: ", Placeholder: "22"},
 		{Prompt: "SSH Key: ", Placeholder: ""},
 	}
 
 	innerModal := textinputmodal.NewTextInputModal("New Connection", inputs, []string{LoadButton, Save, Cancel})
+	return &ConnectionModal{
+		configLookup:  configLookup,
+		defaultInputs: inputs,
+		inner:         []textinputmodal.TextInputModal{innerModal},
+	}
+}
+
+func EditConnectionModal(connection connectiontable.ConnectionHost, configLookup configLookup) *ConnectionModal {
+	inputs := []textinputmodal.TextInput{
+		{Prompt: "Name: ", Placeholder: ""},
+		{Prompt: "User: ", Placeholder: getUsername(), Value: connection.User},
+		{Prompt: "Host: ", Placeholder: "", Value: connection.Host},
+		{Prompt: "Port: ", Placeholder: "22", Value: strconv.Itoa(int(connection.Port))},
+		{Prompt: "SSH Key: ", Placeholder: "", Value: connection.SSHKey},
+	}
+
+	innerModal := textinputmodal.NewTextInputModal("Edit Connection", inputs, []string{LoadButton, Save, Cancel})
 	return &ConnectionModal{
 		configLookup:  configLookup,
 		defaultInputs: inputs,
