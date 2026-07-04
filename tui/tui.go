@@ -71,7 +71,7 @@ var MainKeyMap = keyMap{
 	ReorderUp:        key.NewBinding(key.WithKeys("pgup"), key.WithHelp("PgUp", "Reorder Up")),
 	ReorderDown:      key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("PgDown", "Reorder Down")),
 	EditConnection:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "Edit Connection")),
-	ExpandLogs:       key.NewBinding(key.WithKeys("f"), key.WithHelp("F", "Expand Logs")),
+	ExpandLogs:       key.NewBinding(key.WithKeys("e"), key.WithHelp("E", "Expand Logs")),
 	ForwardLocal:     key.NewBinding(key.WithKeys("l"), key.WithHelp("L", "Local Forwards")),
 	ForwardRemote:    key.NewBinding(key.WithKeys("r"), key.WithHelp("R", "Remote Forwards")),
 	Cancel:           key.NewBinding(key.WithKeys("esc"), key.WithHelp("Esc", "Cancel")),
