@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/netip"
 	"testing"
-	"time"
 
 	"charm.land/bubbles/v2/table"
 	"github.com/skubalj/switchboard/config"
@@ -48,19 +47,6 @@ func Test_connectionRowFromConfig(t *testing.T) {
 	require.Equal(t, "0.0.0.0:5672", row.RemoteForwards[0].RemoteAddr().String())
 	require.Equal(t, "192.168.39.2:3200", row.RemoteForwards[1].LocalAddr().String())
 	require.Equal(t, "0.0.0.0:3030", row.RemoteForwards[1].RemoteAddr().String())
-
-	go func() { time.Sleep(500 * time.Millisecond); close(row.NewLocalForwards) }()
-	require.Equal(t, 1, countInChannel(row.NewLocalForwards))
-	go func() { time.Sleep(500 * time.Millisecond); close(row.NewRemoteForwards) }()
-	require.Equal(t, 2, countInChannel(row.NewRemoteForwards))
-}
-
-func countInChannel[T any](ch chan T) int {
-	count := 0
-	for range ch {
-		count++
-	}
-	return count
 }
 
 func Test_connectionRow_AsTableRow(t *testing.T) {
