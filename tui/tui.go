@@ -30,11 +30,11 @@ import (
 type Model struct {
 	// Application State
 	ctx         context.Context
-	ctxCancel   func()
+	ctxCancel   context.CancelFunc
 	msgTx       messaging.Tx
 	msgRx       messaging.Rx
 	logFileCh   chan string
-	connections []connectiontable.ConnectionRow
+	connections []*connectiontable.ConnectionRow
 	config      config.Config
 
 	// UI State
@@ -118,7 +118,7 @@ func InitialModel(logConfig config.LogConfig, cfg config.Config) *Model {
 		}
 	}
 
-	connections := make([]connectiontable.ConnectionRow, 0, len(cfg.Connections))
+	connections := make([]*connectiontable.ConnectionRow, 0, len(cfg.Connections))
 	for _, conn := range cfg.Connections {
 		connections = append(connections, connectiontable.ConnectionRowFromConfig(ctx, conn))
 	}
@@ -149,6 +149,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) Close() {
+	m.ctxCancel()
 	m.msgTx.Close()
 	if m.logFileCh != nil {
 		close(m.logFileCh)
@@ -164,12 +165,12 @@ func (m *Model) GetConfigConnections() []config.Connection {
 	for _, conn := range m.connections {
 		lfs := make([]config.PortForward, 0, len(conn.LocalForwards))
 		for _, fw := range conn.LocalForwards {
-			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
+			lfs = append(lfs, fw.AsConfig())
 		}
 
 		rfs := make([]config.PortForward, 0, len(conn.RemoteForwards))
 		for _, fw := range conn.RemoteForwards {
-			lfs = append(lfs, config.PortForward{LocalAddr: fw.LocalAddr, RemoteAddr: fw.RemoteAddr})
+			rfs = append(rfs, fw.AsConfig())
 		}
 
 		hosts := make([]config.Host, 0, len(conn.Hosts))
@@ -321,23 +322,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectiontable.ConnectionRow:
 		selectedIdx := m.connectionTable.Cursor()
 		if selectedIdx < len(m.connections) {
-			m.connections[selectedIdx] = msg
+			m.connections[selectedIdx] = &msg
 		} else {
-			m.connections = append(m.connections, msg)
+			m.connections = append(m.connections, &msg)
 		}
 
 		m.updateTableRows()
 
 	case passwordmodal.PasswordMessage:
-		idx := slices.IndexFunc(m.connections, func(c connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
+		idx := slices.IndexFunc(m.connections, func(c *connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
 		if idx < 0 {
 			m.modalLayer = errormodal.NewErrorModal("Error", "got password for unknown connection")
 			return m, nil
 		}
 		row := m.connections[idx]
+		row.SetContext(m.ctx)
 		connection := row.MakeConnection(msg.Passwords)
-		ctx, dropCallback := context.WithCancel(m.ctx)
-		m.connections[idx].DropConnection = dropCallback
 		errCh := make(chan error)
 		m.updateTableRows()
 
@@ -347,8 +347,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return ConnectionDropped(row.UID)
 			},
 			func() tea.Msg {
-				err := portforwarding.ConnectToClient(ctx, m.config, errCh, m.msgTx, connection)
+				err := portforwarding.ConnectToClient(row.Ctx, m.config, errCh, m.msgTx, connection)
 				if err != nil {
+					row.DropConnection()
 					return errormodal.ErrorMsg{Title: "Connection Error", Err: err}
 				}
 				return ConnectionEstablished(row.UID)
@@ -359,6 +360,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		row := m.getConnectionByUID(uint32(msg))
 		if row != nil {
 			row.Online = true
+			row.StartPortForwards()
 			m.updateTableRows()
 			return m, nil
 		}
@@ -377,9 +379,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		arr := m.connections[idx].LocalForwards
-		display, backend := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
-		arr = append(arr, display)
-		go func() { m.connections[idx].NewLocalForwards <- backend }()
+		pf := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		arr = append(arr, pf)
+		go func() { m.connections[idx].NewLocalForwards <- pf }()
 		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].LocalForwards = arr
 		m.updateTableRows()
@@ -391,7 +393,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		portIdx := int(msg)
 		arr := m.connections[idx].LocalForwards
-		arr[portIdx].StopCallback()
+		arr[portIdx].Close()
 		arr = slices.Delete(arr, portIdx, portIdx+1)
 		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
 		m.connections[idx].LocalForwards = arr
@@ -403,10 +405,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		arr := m.connections[idx].RemoteForwards
-		display, backend := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
-		arr = append(arr, display)
-		go func() { m.connections[idx].NewRemoteForwards <- backend }()
-		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
+		pf := portforwardmodal.NewPortForwardFromConfig(m.ctx, config.PortForward(msg))
+		arr = append(arr, pf)
+		go func() { m.connections[idx].NewRemoteForwards <- pf }()
+		m.modalLayer = portforwardmodal.NewRemoteForwardingModal(arr)
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
 
@@ -417,9 +419,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		portIdx := int(msg)
 		arr := m.connections[idx].RemoteForwards
-		arr[portIdx].StopCallback()
+		arr[portIdx].Close()
 		arr = slices.Delete(arr, portIdx, portIdx+1)
-		m.modalLayer = portforwardmodal.NewLocalForwardingModal(arr)
+		m.modalLayer = portforwardmodal.NewRemoteForwardingModal(arr)
 		m.connections[idx].RemoteForwards = arr
 		m.updateTableRows()
 
@@ -434,7 +436,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) getConnectionByUID(uid uint32) *connectiontable.ConnectionRow {
 	for idx, conn := range m.connections {
 		if conn.UID == uid {
-			return &m.connections[idx]
+			return m.connections[idx]
 		}
 	}
 	return nil

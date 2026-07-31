@@ -40,14 +40,14 @@ func Test_connectionRowFromConfig(t *testing.T) {
 	require.Equal(t, uint16(22), row.Hosts[0].Port)
 	require.Empty(t, row.Hosts[0].SSHKey)
 	require.Len(t, row.LocalForwards, 1)
-	require.Equal(t, "127.0.0.1:8080", row.LocalForwards[0].LocalAddr.String())
-	require.Equal(t, "127.0.0.1:3000", row.LocalForwards[0].RemoteAddr.String())
+	require.Equal(t, "127.0.0.1:8080", row.LocalForwards[0].LocalAddr().String())
+	require.Equal(t, "127.0.0.1:3000", row.LocalForwards[0].RemoteAddr().String())
 
 	require.Len(t, row.RemoteForwards, 2)
-	require.Equal(t, "192.168.0.1:4500", row.RemoteForwards[0].LocalAddr.String())
-	require.Equal(t, "0.0.0.0:5672", row.RemoteForwards[0].RemoteAddr.String())
-	require.Equal(t, "192.168.39.2:3200", row.RemoteForwards[1].LocalAddr.String())
-	require.Equal(t, "0.0.0.0:3030", row.RemoteForwards[1].RemoteAddr.String())
+	require.Equal(t, "192.168.0.1:4500", row.RemoteForwards[0].LocalAddr().String())
+	require.Equal(t, "0.0.0.0:5672", row.RemoteForwards[0].RemoteAddr().String())
+	require.Equal(t, "192.168.39.2:3200", row.RemoteForwards[1].LocalAddr().String())
+	require.Equal(t, "0.0.0.0:3030", row.RemoteForwards[1].RemoteAddr().String())
 
 	go func() { time.Sleep(500 * time.Millisecond); close(row.NewLocalForwards) }()
 	require.Equal(t, 1, countInChannel(row.NewLocalForwards))
@@ -71,15 +71,15 @@ func Test_connectionRow_AsTableRow(t *testing.T) {
 	row.Hosts[0].Port = 2222
 	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "0", "0"}, row.AsTableRow())
 
-	row.LocalForwards = append(row.LocalForwards, portforwardmodal.PortForward{
+	row.LocalForwards = append(row.LocalForwards, portforwardmodal.NewPortForwardFromConfig(context.Background(), config.PortForward{
 		LocalAddr:  netip.MustParseAddrPort("127.0.0.1:8080"),
 		RemoteAddr: netip.MustParseAddrPort("127.0.0.1:3030"),
-	})
+	}))
 	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "1", "0"}, row.AsTableRow())
 
-	row.RemoteForwards = append(row.RemoteForwards, portforwardmodal.PortForward{
+	row.RemoteForwards = append(row.RemoteForwards, portforwardmodal.NewPortForwardFromConfig(context.Background(), config.PortForward{
 		LocalAddr:  netip.MustParseAddrPort("127.0.0.1:1234"),
 		RemoteAddr: netip.MustParseAddrPort("127.0.0.1:2234"),
-	})
+	}))
 	require.Equal(t, table.Row{"", "Connection", "user@hostname:2222", "~/.ssh/id_ed25519", "1", "1"}, row.AsTableRow())
 }

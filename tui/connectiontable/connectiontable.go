@@ -21,15 +21,16 @@ var rowIdx = new(atomic.Uint32)
 
 // A row in the connection table
 type ConnectionRow struct {
+	Ctx               context.Context
+	DropConnection    context.CancelFunc // Signal that the connection should be dropped
 	UID               uint32
 	Online            bool
 	Name              string
 	Hosts             []ConnectionHost
-	LocalForwards     []portforwardmodal.PortForward
+	LocalForwards     []*portforwardmodal.PortForward
 	NewLocalForwards  chan portforwarding.PortForward
-	RemoteForwards    []portforwardmodal.PortForward
+	RemoteForwards    []*portforwardmodal.PortForward
 	NewRemoteForwards chan portforwarding.PortForward
-	DropConnection    context.CancelFunc // Signal that the connection should be dropped
 }
 
 type ConnectionHost struct {
@@ -44,8 +45,8 @@ func (h ConnectionHost) Address() string {
 }
 
 // Initialize a new connection row
-func NewConnectionRow(name string, hosts []ConnectionHost) ConnectionRow {
-	return ConnectionRow{
+func NewConnectionRow(name string, hosts []ConnectionHost) *ConnectionRow {
+	return &ConnectionRow{
 		UID:               rowIdx.Add(1),
 		Name:              name,
 		Hosts:             hosts,
@@ -56,7 +57,7 @@ func NewConnectionRow(name string, hosts []ConnectionHost) ConnectionRow {
 	}
 }
 
-func ConnectionRowFromConfig(ctx context.Context, conn config.Connection) ConnectionRow {
+func ConnectionRowFromConfig(ctx context.Context, conn config.Connection) *ConnectionRow {
 	hosts := make([]ConnectionHost, 0, len(conn.Hosts))
 	for _, host := range conn.Hosts {
 		hosts = append(hosts, ConnectionHost{
@@ -69,35 +70,38 @@ func ConnectionRowFromConfig(ctx context.Context, conn config.Connection) Connec
 
 	connectionRow := NewConnectionRow(conn.Name, hosts)
 
-	connectionRow.LocalForwards = make([]portforwardmodal.PortForward, 0, len(conn.LocalForwards))
-	localForwards := make([]portforwarding.PortForward, 0, len(conn.LocalForwards))
+	connectionRow.LocalForwards = make([]*portforwardmodal.PortForward, 0, len(conn.LocalForwards))
 	for _, f := range conn.LocalForwards {
-		pfRow, pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
-		connectionRow.LocalForwards = append(connectionRow.LocalForwards, pfRow)
-		localForwards = append(localForwards, pf)
+		pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
+		connectionRow.LocalForwards = append(connectionRow.LocalForwards, pf)
 	}
 
-	go func() {
-		for _, forward := range localForwards {
-			connectionRow.NewLocalForwards <- forward
-		}
-	}()
-
-	connectionRow.RemoteForwards = make([]portforwardmodal.PortForward, 0, len(conn.RemoteForwards))
-	remoteForwards := make([]portforwarding.PortForward, 0, len(conn.RemoteForwards))
+	connectionRow.RemoteForwards = make([]*portforwardmodal.PortForward, 0, len(conn.RemoteForwards))
 	for _, f := range conn.RemoteForwards {
-		pfRow, pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
-		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pfRow)
-		remoteForwards = append(remoteForwards, pf)
+		pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
+		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pf)
 	}
-
-	go func() {
-		for _, forward := range remoteForwards {
-			connectionRow.NewRemoteForwards <- forward
-		}
-	}()
 
 	return connectionRow
+}
+
+func (row *ConnectionRow) SetContext(ctx context.Context) {
+	if row.DropConnection != nil {
+		// Release any resources that are currently held as we switch to the new context.
+		row.DropConnection()
+	}
+	row.Ctx, row.DropConnection = context.WithCancel(ctx)
+}
+
+func (row *ConnectionRow) StartPortForwards() {
+	for _, fw := range row.LocalForwards {
+		fw.SetContext(row.Ctx)
+		row.NewLocalForwards <- fw
+	}
+	for _, fw := range row.RemoteForwards {
+		fw.SetContext(row.Ctx)
+		row.NewRemoteForwards <- fw
+	}
 }
 
 func (row ConnectionRow) AsTableRow() table.Row {
@@ -204,7 +208,7 @@ func MakeColumns(width int) []table.Column {
 	}
 }
 
-func TableRows(cons []ConnectionRow) []table.Row {
+func TableRows(cons []*ConnectionRow) []table.Row {
 	rows := make([]table.Row, 0, len(cons)+1)
 	for _, connection := range cons {
 		rows = append(rows, connection.AsTableRow())

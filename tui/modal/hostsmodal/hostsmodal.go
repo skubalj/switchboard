@@ -192,7 +192,7 @@ func (m *HostsModal) loadFromConfig() {
 	m.tableState.SetRows(makeRows(m.hosts))
 }
 
-func (m *HostsModal) createConnectionRow() connectiontable.ConnectionRow {
+func (m *HostsModal) createConnectionRow() *connectiontable.ConnectionRow {
 	return connectiontable.NewConnectionRow(m.connectionName.Value(), m.hosts)
 }
 

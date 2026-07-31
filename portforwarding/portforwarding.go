@@ -46,11 +46,11 @@ type Connection struct {
 	RemoteForwards <-chan PortForward
 }
 
-// Typed defintiion of a port forward operation
-type PortForward struct {
-	Ctx        context.Context
-	LocalAddr  netip.AddrPort
-	RemoteAddr netip.AddrPort
+// Typed definition of a port forward operation
+type PortForward interface {
+	Ctx() context.Context
+	LocalAddr() netip.AddrPort
+	RemoteAddr() netip.AddrPort
 }
 
 type AuthMethod interface {
@@ -188,8 +188,8 @@ func mainLoop(
 	defer client.Close()
 
 	host := conn.Hosts[len(conn.Hosts)-1]
-	msgs.Infof("Established connection to %s@%s", host.User, host.Host)
-	defer msgs.Infof("Closed connection to %s@%s", host.User, host.Host)
+	msgs.Infof("established connection to %s@%s", host.User, host.Host)
+	defer msgs.Infof("closed connection to %s@%s", host.User, host.Host)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -198,7 +198,7 @@ func mainLoop(
 		case <-ctx.Done():
 			err := eg.Wait()
 			if err != nil {
-				msgs.Errorf("connection %s@%s broken: %v", host.User, host.Host, err)
+				msgs.Errorf("connection %s@%s disconnected: %v", host.User, host.Host, err)
 			}
 			// Push to the err channel to inform the UI that we disconnected
 			errCh <- err
@@ -213,26 +213,26 @@ func mainLoop(
 
 // Connections to the given TCP port on the local (client) host are to be forwarded to the given host and port
 func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
-	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
-		msgs.Tracef("skipping closed forward from local address '%s' to remote address '%s'", addresses.LocalAddr.String(), addresses.RemoteAddr.String())
+	if cmp.Or(ctx.Err(), addresses.Ctx().Err()) != nil {
+		msgs.Tracef("skipping closed forward from local address '%s' to remote address '%s'", addresses.LocalAddr().String(), addresses.RemoteAddr().String())
 		return nil
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	localListener, err := net.ListenTCP("tcp", net.TCPAddrFromAddrPort(addresses.LocalAddr))
+	localListener, err := net.ListenTCP("tcp", net.TCPAddrFromAddrPort(addresses.LocalAddr()))
 	if err != nil {
-		return fmt.Errorf("unable to open listener for local address %s: %w", addresses.LocalAddr, err)
+		return fmt.Errorf("unable to open listener for local address %s: %w", addresses.LocalAddr(), err)
 	}
 
-	msgs.Infof("Now listening on local port %s", addresses.LocalAddr)
-	defer msgs.Infof("Listener on local port %s closed", addresses.LocalAddr)
+	msgs.Infof("now listening on local port %s", addresses.LocalAddr())
+	defer msgs.Infof("listener on local port %s closed", addresses.LocalAddr())
 
 	go func() {
 		select {
 		case <-ctx.Done():
-		case <-addresses.Ctx.Done():
+		case <-addresses.Ctx().Done():
 		}
 		localListener.Close()
 	}()
@@ -242,17 +242,17 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 		if errors.Is(err, net.ErrClosed) {
 			return nil
 		} else if err != nil {
-			return fmt.Errorf("listener closed: %w", err)
+			return fmt.Errorf("local listener closed: %w", err)
 		}
-		msgs.Tracef("New connection to local port %s", addresses.LocalAddr)
+		msgs.Tracef("new connection to local port %s", addresses.LocalAddr())
 
 		go func() {
 			defer localConn.Close()
-			defer msgs.Tracef("Connection to local port %s closed", addresses.LocalAddr)
+			defer msgs.Tracef("connection to local port %s closed", addresses.LocalAddr())
 
-			remoteConn, err := client.Dial("tcp", addresses.RemoteAddr.String())
+			remoteConn, err := client.Dial("tcp", addresses.RemoteAddr().String())
 			if err != nil {
-				msgs.Errorf("unable to dial remote address %s: %w", addresses.RemoteAddr, err)
+				msgs.Errorf("unable to dial remote address %s: %w", addresses.RemoteAddr(), err)
 				return
 			}
 			defer remoteConn.Close()
@@ -268,43 +268,48 @@ func forwardLocal(ctx context.Context, client *ssh.Client, addresses PortForward
 
 // Connections to the given TCP port on the remote (server) host are to be forwarded to the local side
 func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForward, msgs messaging.Tx) error {
-	if cmp.Or(ctx.Err(), addresses.Ctx.Err()) != nil {
-		msgs.Tracef("skipping closed forward from remote address '%s' to local address '%s'", addresses.RemoteAddr.String(), addresses.LocalAddr.String())
+	if cmp.Or(ctx.Err(), addresses.Ctx().Err()) != nil {
+		msgs.Tracef("skipping closed forward from remote address '%s' to local address '%s'", addresses.RemoteAddr().String(), addresses.LocalAddr().String())
 		return nil
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	remoteListener, err := client.ListenTCP(net.TCPAddrFromAddrPort(addresses.RemoteAddr))
+	remoteListener, err := client.ListenTCP(net.TCPAddrFromAddrPort(addresses.RemoteAddr()))
 	if err != nil {
-		return fmt.Errorf("unable to open listener for remote address %s: %w", addresses.RemoteAddr, err)
+		return fmt.Errorf("unable to open listener for remote address %s: %w", addresses.RemoteAddr(), err)
 	}
 
-	msgs.Infof("Now listening on host %s@%s to port %s", client.User(), client.LocalAddr(), addresses.RemoteAddr)
-	defer msgs.Infof("Listener on host %s@%s to port %s closed", client.User(), client.LocalAddr(), addresses.RemoteAddr)
+	msgs.Infof("now listening on host %s@%s to port %s", client.User(), client.RemoteAddr(), addresses.RemoteAddr())
+	defer msgs.Infof("listener on host %s@%s to port %s closed", client.User(), client.RemoteAddr(), addresses.RemoteAddr())
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-addresses.Ctx().Done():
+		}
 		remoteListener.Close()
 	}()
 
 	for {
 		remoteConn, err := remoteListener.Accept()
-		if errors.Is(err, net.ErrClosed) {
+		if errors.Is(err, io.EOF) {
+			// Note: For some reason, the remote listener returns `io.EOF`
+			// instead of `net.ErrClosed` when it is closed.
 			return nil
 		} else if err != nil {
-			return fmt.Errorf("listener closed: %w", err)
+			return fmt.Errorf("remote listener closed: %w", err)
 		}
-		msgs.Tracef("New connection to remote port %s", addresses.RemoteAddr)
+		msgs.Tracef("new connection to remote port %s", addresses.RemoteAddr())
 
 		go func() {
 			defer remoteConn.Close()
-			defer msgs.Tracef("Connection to remote port %s closed", addresses.RemoteAddr)
+			defer msgs.Tracef("connection to remote port %s closed", addresses.RemoteAddr())
 
-			localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr))
+			localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr()))
 			if err != nil {
-				msgs.Errorf("unable to dial local address %s: %w", addresses.LocalAddr, err)
+				msgs.Errorf("unable to dial local address %s: %w", addresses.LocalAddr(), err)
 				return
 			}
 			defer localConn.Close()

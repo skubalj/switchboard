@@ -8,34 +8,29 @@ import (
 
 	"charm.land/bubbles/v2/table"
 	"github.com/skubalj/switchboard/config"
-	"github.com/skubalj/switchboard/portforwarding"
 	"github.com/skubalj/switchboard/tui/style"
 )
 
 type PortForward struct {
-	StopCallback context.CancelFunc
-	LocalAddr    netip.AddrPort
-	RemoteAddr   netip.AddrPort
+	ctx          context.Context
+	stopCallback context.CancelFunc
+	cfg          config.PortForward
 }
 
-type ForwardPair struct {
-	IsLocal bool
-	Tx      PortForward
-	Rx      portforwarding.PortForward
+func (pf *PortForward) SetContext(ctx context.Context) {
+	pf.ctx, pf.stopCallback = context.WithCancel(ctx)
 }
+func (pf PortForward) Ctx() context.Context         { return pf.ctx }
+func (pf PortForward) Close()                       { pf.stopCallback() }
+func (pf PortForward) LocalAddr() netip.AddrPort    { return pf.cfg.LocalAddr }
+func (pf PortForward) RemoteAddr() netip.AddrPort   { return pf.cfg.RemoteAddr }
+func (pf PortForward) AsConfig() config.PortForward { return pf.cfg }
 
-func NewPortForwardFromConfig(ctx context.Context, f config.PortForward) (PortForward, portforwarding.PortForward) {
-	ctx, cancel := context.WithCancel(ctx)
-
-	return PortForward{
-			StopCallback: cancel,
-			LocalAddr:    f.LocalAddr,
-			RemoteAddr:   f.RemoteAddr,
-		}, portforwarding.PortForward{
-			Ctx:        ctx,
-			LocalAddr:  f.LocalAddr,
-			RemoteAddr: f.RemoteAddr,
-		}
+func NewPortForwardFromConfig(ctx context.Context, f config.PortForward) *PortForward {
+	pf := new(PortForward)
+	pf.cfg = f
+	pf.SetContext(ctx)
+	return pf
 }
 
 func newPortForward(localHost, localPort, remoteHost, remotePort string) (config.PortForward, error) {
@@ -59,7 +54,7 @@ func parseAddrPort(host, port string) (netip.AddrPort, error) {
 	return netip.AddrPortFrom(addr, uint16(p)), cmp.Or(e1, e2)
 }
 
-func newLocalForwardingTable(forwards []PortForward) table.Model {
+func newLocalForwardingTable(forwards []*PortForward) table.Model {
 	tbl := table.New(
 		table.WithColumns(makeLocalForwardingColumns(80)),
 		table.WithRows(makeLocalForwardingRows(forwards)),
@@ -82,14 +77,14 @@ func makeLocalForwardingColumns(width int) []table.Column {
 	}
 }
 
-func makeLocalForwardingRows(forwards []PortForward) []table.Row {
+func makeLocalForwardingRows(forwards []*PortForward) []table.Row {
 	rows := make([]table.Row, 0, len(forwards)+1)
 	for _, fw := range forwards {
 		rows = append(rows, table.Row{
-			fw.LocalAddr.Addr().String(),
-			strconv.FormatUint(uint64(fw.LocalAddr.Port()), 10),
-			fw.RemoteAddr.Addr().String(),
-			strconv.FormatUint(uint64(fw.RemoteAddr.Port()), 10),
+			fw.LocalAddr().Addr().String(),
+			strconv.FormatUint(uint64(fw.LocalAddr().Port()), 10),
+			fw.RemoteAddr().Addr().String(),
+			strconv.FormatUint(uint64(fw.RemoteAddr().Port()), 10),
 		})
 	}
 
@@ -103,7 +98,7 @@ func makeLocalForwardingRows(forwards []PortForward) []table.Row {
 	return rows
 }
 
-func newRemoteForwardingTable(forwards []PortForward) table.Model {
+func newRemoteForwardingTable(forwards []*PortForward) table.Model {
 	tbl := table.New(
 		table.WithColumns(makeLocalForwardingColumns(100)),
 		table.WithRows(makeRemoteForwardingRows(forwards)),
@@ -127,14 +122,14 @@ func makeRemoteForwardingColumns(width int) []table.Column {
 	}
 }
 
-func makeRemoteForwardingRows(forwards []PortForward) []table.Row {
+func makeRemoteForwardingRows(forwards []*PortForward) []table.Row {
 	rows := make([]table.Row, 0, len(forwards)+1)
 	for _, fw := range forwards {
 		rows = append(rows, table.Row{
-			fw.RemoteAddr.Addr().String(),
-			strconv.FormatUint(uint64(fw.RemoteAddr.Port()), 10),
-			fw.LocalAddr.Addr().String(),
-			strconv.FormatUint(uint64(fw.LocalAddr.Port()), 10),
+			fw.RemoteAddr().Addr().String(),
+			strconv.FormatUint(uint64(fw.RemoteAddr().Port()), 10),
+			fw.LocalAddr().Addr().String(),
+			strconv.FormatUint(uint64(fw.LocalAddr().Port()), 10),
 		})
 	}
 

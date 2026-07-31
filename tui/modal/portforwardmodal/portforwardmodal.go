@@ -20,12 +20,12 @@ type NewRemoteForward config.PortForward
 type DeleteRemoteForward int
 
 type PortForwardingModal struct {
-	portForwards []PortForward
+	portForwards []*PortForward
 	tableState   table.Model
 	isLocal      bool
 }
 
-func NewLocalForwardingModal(forwards []PortForward) modal.Window {
+func NewLocalForwardingModal(forwards []*PortForward) modal.Window {
 	return &PortForwardingModal{
 		portForwards: forwards,
 		tableState:   newLocalForwardingTable(forwards),
@@ -33,7 +33,7 @@ func NewLocalForwardingModal(forwards []PortForward) modal.Window {
 	}
 }
 
-func NewRemoteForwardingModal(forwards []PortForward) modal.Window {
+func NewRemoteForwardingModal(forwards []*PortForward) modal.Window {
 	return &PortForwardingModal{
 		portForwards: forwards,
 		tableState:   newRemoteForwardingTable(forwards),
