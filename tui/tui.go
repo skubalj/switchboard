@@ -319,12 +319,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.getLogMessage
 		}
 
-	case connectiontable.ConnectionRow:
+	case *connectiontable.ConnectionRow:
 		selectedIdx := m.connectionTable.Cursor()
 		if selectedIdx < len(m.connections) {
-			m.connections[selectedIdx] = &msg
+			m.connections[selectedIdx] = msg
 		} else {
-			m.connections = append(m.connections, &msg)
+			m.connections = append(m.connections, msg)
 		}
 
 		m.updateTableRows()
