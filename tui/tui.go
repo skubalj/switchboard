@@ -29,13 +29,15 @@ import (
 
 type Model struct {
 	// Application State
-	ctx         context.Context
-	ctxCancel   context.CancelFunc
-	msgTx       messaging.Tx
-	msgRx       messaging.Rx
-	logFileCh   chan string
-	connections []*connectiontable.ConnectionRow
-	config      config.Config
+	ctx               context.Context
+	ctxCancel         context.CancelFunc
+	msgTx             messaging.Tx
+	msgRx             messaging.Rx
+	logFileCh         chan string
+	getPassword       chan portforwarding.GetPasswordRequest
+	connectionFactory portforwarding.ConnectionFactory
+	connections       []*connectiontable.ConnectionRow
+	config            config.Config
 
 	// UI State
 	viewportWidth   int
@@ -118,30 +120,42 @@ func InitialModel(logConfig config.LogConfig, cfg config.Config) *Model {
 		}
 	}
 
+	getPassword := make(chan portforwarding.GetPasswordRequest)
+	connectionFactory, err := portforwarding.New(cfg, tx, getPassword)
+	if err != nil {
+		tx.SendError(err)
+	}
+
 	connections := make([]*connectiontable.ConnectionRow, 0, len(cfg.Connections))
 	for _, conn := range cfg.Connections {
 		connections = append(connections, connectiontable.ConnectionRowFromConfig(ctx, conn))
 	}
 
 	modal := &Model{
-		ctx:             ctx,
-		ctxCancel:       cancel,
-		msgTx:           tx,
-		msgRx:           rx,
-		logFileCh:       logFileCh,
-		connections:     connections,
-		config:          cfg,
-		help:            help.New(),
-		logs:            ringbuffer.New[string](100),
-		logsViewport:    viewport.New(),
-		connectionTable: connectiontable.NewTable(),
+		ctx:               ctx,
+		ctxCancel:         cancel,
+		msgTx:             tx,
+		msgRx:             rx,
+		logFileCh:         logFileCh,
+		getPassword:       getPassword,
+		connectionFactory: connectionFactory,
+		connections:       connections,
+		config:            cfg,
+		help:              help.New(),
+		logs:              ringbuffer.New[string](100),
+		logsViewport:      viewport.New(),
+		connectionTable:   connectiontable.NewTable(),
 	}
 	modal.updateTableRows()
 
 	return modal
 }
 
-type ConnectionEstablished uint32
+type ConnectionEstablished struct {
+	UID          uint32
+	OnDisconnect <-chan struct{}
+}
+
 type ConnectionDropped uint32
 
 func (m *Model) Init() tea.Cmd {
@@ -156,9 +170,8 @@ func (m *Model) Close() {
 	}
 }
 
-func (m *Model) getLogMessage() tea.Msg {
-	return m.msgRx.NextMessage(m.ctx)
-}
+func (m *Model) getLogMessage() tea.Msg      { return m.msgRx.NextMessage(m.ctx) }
+func (m *Model) getPasswordRequest() tea.Msg { return <-m.getPassword }
 
 func (m *Model) GetConfigConnections() []config.Connection {
 	conns := make([]config.Connection, 0, len(m.connections))
@@ -264,15 +277,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.connections[selectedIdx].DropConnection()
 			} else {
 				selectedConnection := m.connections[selectedIdx]
-				targets := make([]string, len(selectedConnection.Hosts))
-				for i, host := range selectedConnection.Hosts {
-					if host.SSHKey == "" {
-						targets[i] = host.Address() + ": "
-					} else {
-						targets[i] = "Key " + host.SSHKey + ": "
+				onClose := make(chan struct{})
+				conn := selectedConnection.MakeConnection(onClose)
+
+				return m, func() tea.Msg {
+					err := m.connectionFactory.ConnectToClient(selectedConnection.Ctx, conn)
+					if err != nil {
+						return errormodal.ErrorMsg{
+							Title: fmt.Sprintf("Error Connecting To %s", selectedConnection.Name),
+							Err:   err,
+						}
+					}
+
+					return ConnectionEstablished{
+						UID:          selectedConnection.UID,
+						OnDisconnect: onClose,
 					}
 				}
-				m.modalLayer = passwordmodal.NewPasswordModal(selectedConnection.UID, targets)
 			}
 
 		case key.Matches(msg, MainKeyMap.DeleteConnection):
@@ -329,40 +350,47 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.updateTableRows()
 
-	case passwordmodal.PasswordMessage:
-		idx := slices.IndexFunc(m.connections, func(c *connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
-		if idx < 0 {
-			m.modalLayer = errormodal.NewErrorModal("Error", "got password for unknown connection")
-			return m, nil
-		}
-		row := m.connections[idx]
-		row.SetContext(m.ctx)
-		connection := row.MakeConnection(msg.Passwords)
-		errCh := make(chan error)
-		m.updateTableRows()
+	case portforwarding.GetPasswordRequest:
+		m.modalLayer = passwordmodal.NewPasswordModal(msg.Comment, msg.Response)
 
-		return m, tea.Batch(
-			func() tea.Msg {
-				<-errCh
-				return ConnectionDropped(row.UID)
-			},
-			func() tea.Msg {
-				err := portforwarding.ConnectToClient(row.Ctx, m.config, errCh, m.msgTx, connection)
-				if err != nil {
-					row.DropConnection()
-					return errormodal.ErrorMsg{Title: "Connection Error", Err: err}
-				}
-				return ConnectionEstablished(row.UID)
-			},
-		)
+	// case passwordmodal.PasswordMessage:
+	// 	idx := slices.IndexFunc(m.connections, func(c *connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
+	// 	if idx < 0 {
+	// 		m.modalLayer = errormodal.NewErrorModal("Error", "got password for unknown connection")
+	// 		return m, nil
+	// 	}
+	// 	row := m.connections[idx]
+	// 	row.SetContext(m.ctx)
+	// 	connection := row.MakeConnection(msg.Passwords)
+	// 	errCh := make(chan error)
+	// 	m.updateTableRows()
+
+	// 	return m, tea.Batch(
+	// 		func() tea.Msg {
+	// 			<-errCh
+	// 			return ConnectionDropped(row.UID)
+	// 		},
+	// 		func() tea.Msg {
+	// 			err := portforwarding.ConnectToClient(row.Ctx, m.config, errCh, m.msgTx, connection)
+	// 			if err != nil {
+	// 				row.DropConnection()
+	// 				return errormodal.ErrorMsg{Title: "Connection Error", Err: err}
+	// 			}
+	// 			return ConnectionEstablished(row.UID)
+	// 		},
+	// 	)
 
 	case ConnectionEstablished:
-		row := m.getConnectionByUID(uint32(msg))
+		row := m.getConnectionByUID(msg.UID)
 		if row != nil {
 			row.Online = true
 			row.StartPortForwards()
 			m.updateTableRows()
-			return m, nil
+			// Rig the disconnect handler
+			return m, func() tea.Msg {
+				<-msg.OnDisconnect
+				return ConnectionDropped(msg.UID)
+			}
 		}
 
 	case ConnectionDropped:

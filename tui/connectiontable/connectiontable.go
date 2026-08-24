@@ -45,8 +45,11 @@ func (h ConnectionHost) Address() string {
 }
 
 // Initialize a new connection row
-func NewConnectionRow(name string, hosts []ConnectionHost) *ConnectionRow {
+func NewConnectionRow(ctx context.Context, name string, hosts []ConnectionHost) *ConnectionRow {
+	ctx, cancel := context.WithCancel(ctx)
 	return &ConnectionRow{
+		Ctx:               ctx,
+		DropConnection:    cancel,
 		UID:               rowIdx.Add(1),
 		Name:              name,
 		Hosts:             hosts,
@@ -68,17 +71,17 @@ func ConnectionRowFromConfig(ctx context.Context, conn config.Connection) *Conne
 		})
 	}
 
-	connectionRow := NewConnectionRow(conn.Name, hosts)
+	connectionRow := NewConnectionRow(ctx, conn.Name, hosts)
 
 	connectionRow.LocalForwards = make([]*portforwardmodal.PortForward, 0, len(conn.LocalForwards))
 	for _, f := range conn.LocalForwards {
-		pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
+		pf := portforwardmodal.NewPortForwardFromConfig(connectionRow.Ctx, f)
 		connectionRow.LocalForwards = append(connectionRow.LocalForwards, pf)
 	}
 
 	connectionRow.RemoteForwards = make([]*portforwardmodal.PortForward, 0, len(conn.RemoteForwards))
 	for _, f := range conn.RemoteForwards {
-		pf := portforwardmodal.NewPortForwardFromConfig(ctx, f)
+		pf := portforwardmodal.NewPortForwardFromConfig(connectionRow.Ctx, f)
 		connectionRow.RemoteForwards = append(connectionRow.RemoteForwards, pf)
 	}
 
@@ -146,31 +149,25 @@ func (row ConnectionRow) ConnectionString() string {
 }
 
 // Create the port forwarding connection side
-func (row ConnectionRow) MakeConnection(passwords []string) portforwarding.Connection {
+func (row ConnectionRow) MakeConnection(onClose chan<- struct{}) portforwarding.Connection {
 	hosts := make([]portforwarding.ConnectionHost, 0, len(row.Hosts))
-	for idx, host := range row.Hosts {
-		hosts = append(hosts, makeConnectionHost(host, passwords[idx]))
+	for _, host := range row.Hosts {
+		hosts = append(hosts, makeConnectionHost(host))
 	}
 
 	return portforwarding.Connection{
+		OnClose:        onClose,
 		Hosts:          hosts,
 		LocalForwards:  row.NewLocalForwards,
 		RemoteForwards: row.NewRemoteForwards,
 	}
 }
 
-func makeConnectionHost(host ConnectionHost, password string) portforwarding.ConnectionHost {
-	var auth portforwarding.AuthMethod
-	if host.SSHKey == "" {
-		auth = portforwarding.PasswordAuth{Password: password}
-	} else {
-		auth = portforwarding.PrivateKeyAuth{Path: resolveUserDir(host.SSHKey), Password: password}
-	}
-
+func makeConnectionHost(host ConnectionHost) portforwarding.ConnectionHost {
 	return portforwarding.ConnectionHost{
-		User: host.User,
-		Auth: auth,
-		Host: host.Host + ":" + strconv.Itoa(int(host.Port)),
+		User:         host.User,
+		Host:         host.Host + ":" + strconv.Itoa(int(host.Port)),
+		IdentityFile: host.SSHKey,
 	}
 }
 

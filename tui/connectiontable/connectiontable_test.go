@@ -50,7 +50,7 @@ func Test_connectionRowFromConfig(t *testing.T) {
 }
 
 func Test_connectionRow_AsTableRow(t *testing.T) {
-	row := NewConnectionRow("Connection", []ConnectionHost{{User: "user", Host: "hostname", Port: 22}})
+	row := NewConnectionRow(context.Background(), "Connection", []ConnectionHost{{User: "user", Host: "hostname", Port: 22}})
 	require.Equal(t, table.Row{"", "Connection", "user@hostname:22", "", "0", "0"}, row.AsTableRow())
 
 	row.Hosts[0].SSHKey = "~/.ssh/id_ed25519"

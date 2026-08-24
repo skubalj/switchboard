@@ -1,6 +1,7 @@
 package hostsmodal
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -193,7 +194,7 @@ func (m *HostsModal) loadFromConfig() {
 }
 
 func (m *HostsModal) createConnectionRow() *connectiontable.ConnectionRow {
-	return connectiontable.NewConnectionRow(m.connectionName.Value(), m.hosts)
+	return connectiontable.NewConnectionRow(context.Background(), m.connectionName.Value(), m.hosts)
 }
 
 func (m *HostsModal) updateFocus() {

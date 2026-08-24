@@ -8,40 +8,52 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/skubalj/chanutils"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/sync/errgroup"
 )
 
 type ConnectionHost struct {
-	User string // user to authenticate as
-	Auth AuthMethod
-	Host string // in the form HOST:PORT
+	User         string // user to authenticate as
+	Host         string // in the form HOST:PORT
+	IdentityFile string
 }
 
-func (h ConnectionHost) AsConfig(hostKeyAlgorithms []string, hostKeyCB ssh.HostKeyCallback) (ssh.ClientConfig, error) {
-	auth, err := h.Auth.Create()
-	if err != nil {
-		return ssh.ClientConfig{}, err
-	}
-
+func (h ConnectionHost) AsConfig(
+	hostKeyAlgorithms []string,
+	sshAgent agent.Agent,
+	pwCallback func(comment string) (string, error),
+	hostKeyCB ssh.HostKeyCallback,
+) ssh.ClientConfig {
 	return ssh.ClientConfig{
-		User:              h.User,
-		Auth:              []ssh.AuthMethod{auth},
+		User: h.User,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeysCallback(sshAgent.Signers),
+			ssh.PublicKeysCallback(func() (signers []ssh.Signer, err error) {
+				return addKey(sshAgent, pwCallback, h.IdentityFile)
+			}),
+			ssh.PasswordCallback(func() (string, error) {
+				return pwCallback(fmt.Sprintf("Password for %s@%s", h.User, h.Host))
+			}),
+		},
 		HostKeyCallback:   hostKeyCB,
 		Timeout:           60 * time.Second,
 		HostKeyAlgorithms: hostKeyAlgorithms,
-	}, nil
+	}
 }
 
 type Connection struct {
-	Hosts          []ConnectionHost // a list of jump hosts leading to the endpoint: the last element
+	// A channel to report errors. Will be closed when the connection is dropped
+	OnClose chan<- struct{}
+	// A list of hosts. The final element is the remote host, the rest are "jump hosts"
+	Hosts          []ConnectionHost
 	LocalForwards  <-chan PortForward
 	RemoteForwards <-chan PortForward
 }
@@ -53,82 +65,71 @@ type PortForward interface {
 	RemoteAddr() netip.AddrPort
 }
 
-type AuthMethod interface {
-	Create() (ssh.AuthMethod, error)
+type ConnectionFactory struct {
+	cfg         config.Config
+	sshAgent    agent.Agent
+	msgs        messaging.Tx
+	getPassword chan<- GetPasswordRequest
 }
 
-type PasswordAuth struct {
-	Password string
-}
-
-func (a PasswordAuth) Create() (ssh.AuthMethod, error) {
-	return ssh.Password(a.Password), nil
-}
-
-type PrivateKeyAuth struct {
-	Path     string
-	Password string
-}
-
-func (a PrivateKeyAuth) Create() (ssh.AuthMethod, error) {
-	key, err := os.ReadFile(a.Path)
+func New(
+	cfg config.Config,
+	msgs messaging.Tx,
+	getPassword chan<- GetPasswordRequest,
+) (ConnectionFactory, error) {
+	a, err := getAgent()
 	if err != nil {
-		return nil, fmt.Errorf("unable to read private key: %w", err)
+		return ConnectionFactory{}, err
 	}
 
-	var signer ssh.Signer
-	if a.Password != "" {
-		decryptedKey, err := ssh.ParseRawPrivateKeyWithPassphrase(key, []byte(a.Password))
-		if err != nil {
-			return nil, fmt.Errorf("unable to decyrpt private key: %w", err)
-		}
-
-		signer, err = ssh.NewSignerFromKey(decryptedKey)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create signer from key: %w", err)
-		}
-
-	} else {
-		signer, err = ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse private key: %v", err)
-		}
-	}
-
-	return ssh.PublicKeys(signer), nil
+	return ConnectionFactory{
+		cfg:         cfg,
+		sshAgent:    a,
+		msgs:        msgs,
+		getPassword: getPassword,
+	}, nil
 }
 
 // Connect to the client and listen for commands on a background thread
-func ConnectToClient(
-	ctx context.Context,
-	cfg config.Config,
-	errCh chan<- error,
-	msgs messaging.Tx,
-	conn Connection,
-) error {
+func (a ConnectionFactory) ConnectToClient(ctx context.Context, conn Connection) error {
 	if len(conn.Hosts) == 0 {
-		return fmt.Errorf("list of hosts cannot be empty")
+		close(conn.OnClose)
+		return errors.New("list of hosts cannot be empty")
 	}
 
-	hostKeyCB, err := hostKeyCB(cfg.KnownHostsFile, msgs)
+	hostKeyCB, err := hostKeyCB(a.cfg.KnownHostsFile, a.msgs)
 	if err != nil {
+		close(conn.OnClose)
 		return fmt.Errorf("unable to create host key callback: %w", err)
 	}
 
 	var client *ssh.Client
 	for _, host := range conn.Hosts {
-		config, err := host.AsConfig(cfg.HostKeyAlgorithms, hostKeyCB)
-		if err != nil {
-			return fmt.Errorf("unable to connect to client %s@%s: %w", host.User, host.Host, err)
-		}
+		config := host.AsConfig(a.cfg.HostKeyAlgorithms, a.sshAgent, a.getPasswordCB(ctx), hostKeyCB)
 		client, err = jumpToHost(client, &config, host)
 		if err != nil {
+			close(conn.OnClose)
 			return fmt.Errorf("unable to connect to SSH server %s@%s: %w", host.User, host.Host, err)
 		}
 	}
 
-	go mainLoop(ctx, errCh, msgs, client, conn)
+	go mainLoop(ctx, a.msgs, client, conn)
 	return nil
+}
+
+func (a ConnectionFactory) getPasswordCB(ctx context.Context) func(comment string) (string, error) {
+	return func(comment string) (string, error) {
+		ch := make(chan string, 1)
+		return chanutils.SendAndRecv(ctx, a.getPassword, ch, GetPasswordRequest{
+			Comment:  comment,
+			Response: ch,
+		})
+	}
+}
+
+type GetPasswordRequest struct {
+	Comment  string
+	Response chan<- string
 }
 
 func hostKeyCB(knownHostsFile string, msgs messaging.Tx) (ssh.HostKeyCallback, error) {
@@ -178,14 +179,9 @@ func keyTypes(keys []knownhosts.KnownKey) []string {
 	return types
 }
 
-func mainLoop(
-	ctx context.Context,
-	errCh chan<- error,
-	msgs messaging.Tx,
-	client *ssh.Client,
-	conn Connection,
-) {
+func mainLoop(ctx context.Context, msgs messaging.Tx, client *ssh.Client, conn Connection) {
 	defer client.Close()
+	defer close(conn.OnClose) // Close the channel to inform the UI that we disconnected
 
 	host := conn.Hosts[len(conn.Hosts)-1]
 	msgs.Infof("established connection to %s@%s", host.User, host.Host)
@@ -200,8 +196,6 @@ func mainLoop(
 			if err != nil {
 				msgs.Errorf("connection %s@%s disconnected: %v", host.User, host.Host, err)
 			}
-			// Push to the err channel to inform the UI that we disconnected
-			errCh <- err
 			return
 		case forward := <-conn.LocalForwards:
 			eg.Go(func() error { return forwardLocal(ctx, client, forward, msgs) })
