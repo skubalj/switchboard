@@ -290,7 +290,8 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 			defer remoteConn.Close()
 			defer msgs.Tracef("connection to remote port %s closed", addresses.RemoteAddr())
 
-			localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr()))
+			localConn, err := net.Dial("tcp", addresses.LocalAddr().String())
+			// localConn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(addresses.LocalAddr()))
 			if err != nil {
 				msgs.Errorf("unable to dial local address %s: %w", addresses.LocalAddr(), err)
 				return
@@ -299,7 +300,7 @@ func forwardRemote(ctx context.Context, client *ssh.Client, addresses PortForwar
 
 			err = copyData(ctx, localConn, remoteConn)
 			if err != nil {
-				msgs.SendError(err)
+				msgs.Tracef("port forwarding connection closed: %s", err)
 				return
 			}
 		}()
@@ -311,28 +312,29 @@ func copyData(ctx context.Context, localConn net.Conn, remoteConn net.Conn) erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	eg, _ := errgroup.WithContext(ctx)
-
-	go func() {
-		<-ctx.Done()
-		localConn.Close()
-		remoteConn.Close()
-	}()
+	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		_, err := io.Copy(localConn, remoteConn)
-		if err != nil {
-			return fmt.Errorf("error copying to local device: %w", err)
-		}
-		return nil
+		<-ctx.Done()
+		return cmp.Or(localConn.Close(), remoteConn.Close())
 	})
 
 	eg.Go(func() error {
-		_, err := io.Copy(remoteConn, localConn)
-		if err != nil {
-			return fmt.Errorf("error copying to remote device: %w", err)
+		defer cancel()
+		_, err := io.Copy(localConn, remoteConn)
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || err == nil {
+			return nil
 		}
-		return nil
+		return fmt.Errorf("error copying to local device: %w", err)
+	})
+
+	eg.Go(func() error {
+		defer cancel()
+		_, err := io.Copy(remoteConn, localConn)
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || err == nil {
+			return nil
+		}
+		return fmt.Errorf("error copying to remote device: %w", err)
 	})
 
 	return eg.Wait()
