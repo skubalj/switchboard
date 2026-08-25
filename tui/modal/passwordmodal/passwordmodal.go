@@ -9,24 +9,24 @@ import (
 )
 
 type PasswordModal struct {
-	title    string
-	res      chan<- string
-	selected int
-	input    textinput.Model
+	title string
+	res   chan<- string
+	input textinput.Model
 }
 
 func NewPasswordModal(title string, response chan<- string) modal.Window {
 	input := textinput.New()
 	input.Prompt = "> "
+	input.EchoMode = textinput.EchoPassword
 	input.SetVirtualCursor(true)
 	input.SetWidth(48)
 	input.SetStyles(style.InputBox)
+	input.Focus()
 
 	return &PasswordModal{
-		title:    title,
-		res:      response,
-		selected: 0,
-		input:    input,
+		title: title,
+		res:   response,
+		input: input,
 	}
 }
 
@@ -40,37 +40,9 @@ func (m *PasswordModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 		case "ctrl+c":
 			return nil, tea.Quit
 		case "enter":
-			switch m.selected {
-			case 1:
-				m.res <- m.input.Value()
-			case 2:
-				close(m.res)
-			}
+			m.res <- m.input.Value()
+			close(m.res)
 			return nil, nil
-		case "up":
-			if m.selected > 0 {
-				m.selected = 0
-			}
-		case "down":
-			if m.selected < 1 {
-				m.selected = 1
-			}
-		case "right":
-			if m.selected == 1 {
-				m.selected = 2
-			}
-		case "left":
-			if m.selected == 2 {
-				m.selected = 1
-			}
-		case "tab":
-			if m.selected < 2 {
-				m.selected++
-			}
-		case "shift+tab":
-			if m.selected > 0 {
-				m.selected--
-			}
 		}
 	}
 

@@ -159,7 +159,10 @@ type ConnectionEstablished struct {
 type ConnectionDropped uint32
 
 func (m *Model) Init() tea.Cmd {
-	return m.getLogMessage
+	return tea.Batch(
+		m.getLogMessage,
+		m.getPasswordRequest,
+	)
 }
 
 func (m *Model) Close() {
@@ -277,6 +280,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.connections[selectedIdx].DropConnection()
 			} else {
 				selectedConnection := m.connections[selectedIdx]
+				selectedConnection.SetContext(m.ctx)
 				onClose := make(chan struct{})
 				conn := selectedConnection.MakeConnection(onClose)
 
@@ -352,33 +356,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case portforwarding.GetPasswordRequest:
 		m.modalLayer = passwordmodal.NewPasswordModal(msg.Comment, msg.Response)
-
-	// case passwordmodal.PasswordMessage:
-	// 	idx := slices.IndexFunc(m.connections, func(c *connectiontable.ConnectionRow) bool { return c.UID == msg.ConnectionID })
-	// 	if idx < 0 {
-	// 		m.modalLayer = errormodal.NewErrorModal("Error", "got password for unknown connection")
-	// 		return m, nil
-	// 	}
-	// 	row := m.connections[idx]
-	// 	row.SetContext(m.ctx)
-	// 	connection := row.MakeConnection(msg.Passwords)
-	// 	errCh := make(chan error)
-	// 	m.updateTableRows()
-
-	// 	return m, tea.Batch(
-	// 		func() tea.Msg {
-	// 			<-errCh
-	// 			return ConnectionDropped(row.UID)
-	// 		},
-	// 		func() tea.Msg {
-	// 			err := portforwarding.ConnectToClient(row.Ctx, m.config, errCh, m.msgTx, connection)
-	// 			if err != nil {
-	// 				row.DropConnection()
-	// 				return errormodal.ErrorMsg{Title: "Connection Error", Err: err}
-	// 			}
-	// 			return ConnectionEstablished(row.UID)
-	// 		},
-	// 	)
 
 	case ConnectionEstablished:
 		row := m.getConnectionByUID(msg.UID)

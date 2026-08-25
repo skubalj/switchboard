@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skubalj/chanutils"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
@@ -31,13 +30,17 @@ func (h ConnectionHost) AsConfig(
 	sshAgent agent.Agent,
 	pwCallback func(comment string) (string, error),
 	hostKeyCB ssh.HostKeyCallback,
+	msgs messaging.Tx,
 ) ssh.ClientConfig {
 	return ssh.ClientConfig{
 		User: h.User,
 		Auth: []ssh.AuthMethod{
-			ssh.PublicKeysCallback(sshAgent.Signers),
 			ssh.PublicKeysCallback(func() (signers []ssh.Signer, err error) {
-				return addKey(sshAgent, pwCallback, h.IdentityFile)
+				signers, err = addKey(sshAgent, pwCallback, h.IdentityFile, msgs)
+				if err != nil {
+					msgs.SendError(err)
+				}
+				return
 			}),
 			ssh.PasswordCallback(func() (string, error) {
 				return pwCallback(fmt.Sprintf("Password for %s@%s", h.User, h.Host))
@@ -103,9 +106,10 @@ func (a ConnectionFactory) ConnectToClient(ctx context.Context, conn Connection)
 		return fmt.Errorf("unable to create host key callback: %w", err)
 	}
 
+	passwordCB := getPasswordCB(ctx, a.getPassword)
 	var client *ssh.Client
 	for _, host := range conn.Hosts {
-		config := host.AsConfig(a.cfg.HostKeyAlgorithms, a.sshAgent, a.getPasswordCB(ctx), hostKeyCB)
+		config := host.AsConfig(a.cfg.HostKeyAlgorithms, a.sshAgent, passwordCB, hostKeyCB, a.msgs)
 		client, err = jumpToHost(client, &config, host)
 		if err != nil {
 			close(conn.OnClose)
@@ -115,21 +119,6 @@ func (a ConnectionFactory) ConnectToClient(ctx context.Context, conn Connection)
 
 	go mainLoop(ctx, a.msgs, client, conn)
 	return nil
-}
-
-func (a ConnectionFactory) getPasswordCB(ctx context.Context) func(comment string) (string, error) {
-	return func(comment string) (string, error) {
-		ch := make(chan string, 1)
-		return chanutils.SendAndRecv(ctx, a.getPassword, ch, GetPasswordRequest{
-			Comment:  comment,
-			Response: ch,
-		})
-	}
-}
-
-type GetPasswordRequest struct {
-	Comment  string
-	Response chan<- string
 }
 
 func hostKeyCB(knownHostsFile string, msgs messaging.Tx) (ssh.HostKeyCallback, error) {

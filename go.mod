@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.4
 	github.com/alexflint/go-arg v1.6.1
 	github.com/kevinburke/ssh_config v1.6.0
-	github.com/skubalj/chanutils v0.0.0-20260817023215-233faaa7ab55
+	github.com/skubalj/chanutils v0.1.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sync v0.21.0
