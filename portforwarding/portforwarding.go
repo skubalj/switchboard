@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/skubalj/chanutils"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"golang.org/x/crypto/ssh"
@@ -72,13 +73,13 @@ type ConnectionFactory struct {
 	cfg         config.Config
 	sshAgent    agent.Agent
 	msgs        messaging.Tx
-	getPassword chan<- GetPasswordRequest
+	getPassword chanutils.RpcChannelClient[string, string]
 }
 
 func New(
 	cfg config.Config,
 	msgs messaging.Tx,
-	getPassword chan<- GetPasswordRequest,
+	getPassword chanutils.RpcChannelClient[string, string],
 ) (ConnectionFactory, error) {
 	a, err := getAgent()
 	if err != nil {

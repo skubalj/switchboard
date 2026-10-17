@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/skubalj/chanutils"
 	"github.com/skubalj/switchboard/config"
 	"github.com/skubalj/switchboard/messaging"
 	"github.com/skubalj/switchboard/portforwarding"
@@ -34,7 +35,7 @@ type Model struct {
 	msgTx             messaging.Tx
 	msgRx             messaging.Rx
 	logFileCh         chan string
-	getPassword       chan portforwarding.GetPasswordRequest
+	getPassword       chanutils.RpcChannel[string, string]
 	connectionFactory portforwarding.ConnectionFactory
 	connections       []*connectiontable.ConnectionRow
 	config            config.Config
@@ -120,7 +121,7 @@ func InitialModel(logConfig config.LogConfig, cfg config.Config) *Model {
 		}
 	}
 
-	getPassword := make(chan portforwarding.GetPasswordRequest)
+	getPassword := chanutils.NewRpcChannel[string, string](0)
 	connectionFactory, err := portforwarding.New(cfg, tx, getPassword)
 	if err != nil {
 		tx.SendError(err)
@@ -157,6 +158,7 @@ type ConnectionEstablished struct {
 }
 
 type ConnectionDropped uint32
+type GetPasswordRequest chanutils.RpcChannelRequest[string, string]
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -174,7 +176,7 @@ func (m *Model) Close() {
 }
 
 func (m *Model) getLogMessage() tea.Msg      { return m.msgRx.NextMessage(m.ctx) }
-func (m *Model) getPasswordRequest() tea.Msg { return <-m.getPassword }
+func (m *Model) getPasswordRequest() tea.Msg { return GetPasswordRequest(<-m.getPassword.Recv()) }
 
 func (m *Model) GetConfigConnections() []config.Connection {
 	conns := make([]config.Connection, 0, len(m.connections))
@@ -354,8 +356,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.updateTableRows()
 
-	case portforwarding.GetPasswordRequest:
-		m.modalLayer = passwordmodal.NewPasswordModal(msg.Comment, msg.Response)
+	case GetPasswordRequest:
+		m.modalLayer = passwordmodal.NewPasswordModal(msg.Msg, chanutils.RpcChannelRequest[string, string](msg))
 
 	case ConnectionEstablished:
 		row := m.getConnectionByUID(msg.UID)

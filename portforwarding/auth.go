@@ -104,12 +104,6 @@ type GetPasswordRequest struct {
 	Response chan<- string
 }
 
-func getPasswordCB(ctx context.Context, req chan<- GetPasswordRequest) func(comment string) (string, error) {
-	return func(comment string) (string, error) {
-		ch := make(chan string, 1)
-		return chanutils.SendAndRecv(ctx, req, ch, GetPasswordRequest{
-			Comment:  comment,
-			Response: ch,
-		})
-	}
+func getPasswordCB(ctx context.Context, req chanutils.RpcChannelClient[string, string]) func(comment string) (string, error) {
+	return func(comment string) (string, error) { return req.SendAndRecv(ctx, comment) }
 }

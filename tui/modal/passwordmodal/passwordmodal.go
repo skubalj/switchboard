@@ -1,6 +1,8 @@
 package passwordmodal
 
 import (
+	"errors"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/skubalj/switchboard/tui/components"
@@ -10,11 +12,16 @@ import (
 
 type PasswordModal struct {
 	title string
-	res   chan<- string
+	res   Responder
 	input textinput.Model
 }
 
-func NewPasswordModal(title string, response chan<- string) modal.Window {
+type Responder interface {
+	Respond(string)
+	RespondErr(error)
+}
+
+func NewPasswordModal(title string, response Responder) modal.Window {
 	input := textinput.New()
 	input.Prompt = "> "
 	input.EchoMode = textinput.EchoPassword
@@ -36,12 +43,13 @@ func (m *PasswordModal) Update(msg tea.Msg) (modal.Window, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
+			m.res.RespondErr(errors.New("operation cancelled"))
 			return nil, nil
 		case "ctrl+c":
+			m.res.RespondErr(errors.New("operation cancelled"))
 			return nil, tea.Quit
 		case "enter":
-			m.res <- m.input.Value()
-			close(m.res)
+			m.res.Respond(m.input.Value())
 			return nil, nil
 		}
 	}
