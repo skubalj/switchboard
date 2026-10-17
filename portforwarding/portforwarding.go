@@ -26,7 +26,7 @@ type ConnectionHost struct {
 }
 
 func (h ConnectionHost) AsConfig(
-	hostKeyAlgorithms []string,
+	cfg config.Config,
 	sshAgent agent.Agent,
 	pwCallback func(comment string) (string, error),
 	hostKeyCB ssh.HostKeyCallback,
@@ -47,8 +47,8 @@ func (h ConnectionHost) AsConfig(
 			}),
 		},
 		HostKeyCallback:   hostKeyCB,
-		Timeout:           60 * time.Second,
-		HostKeyAlgorithms: hostKeyAlgorithms,
+		Timeout:           time.Duration(cfg.ConnectionTimeoutSeconds) * time.Second,
+		HostKeyAlgorithms: cfg.HostKeyAlgorithms,
 	}
 }
 
@@ -109,7 +109,7 @@ func (a ConnectionFactory) ConnectToClient(ctx context.Context, conn Connection)
 	passwordCB := getPasswordCB(ctx, a.getPassword)
 	var client *ssh.Client
 	for _, host := range conn.Hosts {
-		config := host.AsConfig(a.cfg.HostKeyAlgorithms, a.sshAgent, passwordCB, hostKeyCB, a.msgs)
+		config := host.AsConfig(a.cfg, a.sshAgent, passwordCB, hostKeyCB, a.msgs)
 		client, err = jumpToHost(client, &config, host)
 		if err != nil {
 			close(conn.OnClose)
@@ -117,7 +117,12 @@ func (a ConnectionFactory) ConnectToClient(ctx context.Context, conn Connection)
 		}
 	}
 
-	go mainLoop(ctx, a.msgs, client, conn)
+	ka := keepAliveInfo{
+		KeepAliveInterval: time.Duration(a.cfg.KeepAliveIntervalSeconds) * time.Second,
+		KeepAliveMaxCount: a.cfg.KeepAliveMaxCount,
+	}
+
+	go mainLoop(ctx, a.msgs, client, conn, ka)
 	return nil
 }
 
@@ -168,7 +173,12 @@ func keyTypes(keys []knownhosts.KnownKey) []string {
 	return types
 }
 
-func mainLoop(ctx context.Context, msgs messaging.Tx, client *ssh.Client, conn Connection) {
+type keepAliveInfo struct {
+	KeepAliveInterval time.Duration
+	KeepAliveMaxCount int
+}
+
+func mainLoop(ctx context.Context, msgs messaging.Tx, client *ssh.Client, conn Connection, keepAlive keepAliveInfo) {
 	defer client.Close()
 	defer close(conn.OnClose) // Close the channel to inform the UI that we disconnected
 
@@ -177,6 +187,29 @@ func mainLoop(ctx context.Context, msgs messaging.Tx, client *ssh.Client, conn C
 	defer msgs.Infof("closed connection to %s@%s", host.User, host.Host)
 
 	eg, ctx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		ticker := time.NewTicker(keepAlive.KeepAliveInterval)
+		defer ticker.Stop()
+		numErrs := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				_, _, err := client.SendRequest("keepalive@golang.org", true, nil)
+				if err != nil {
+					numErrs++
+					if numErrs > keepAlive.KeepAliveMaxCount {
+						return fmt.Errorf("connection dead: missed %d keepalives", numErrs)
+					}
+					msgs.Warnf("connection %s@%s missed keepalive (number %d)", host.User, host.Host, numErrs)
+				} else {
+					numErrs = 0
+				}
+			}
+		}
+	})
 
 	for {
 		select {

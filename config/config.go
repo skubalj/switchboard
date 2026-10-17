@@ -45,9 +45,12 @@ func DefaultConfig() (Config, error) {
 	}
 
 	return Config{
-		SSHConfigFile:     filepath.Join(homedir, ".ssh", "config"),
-		KnownHostsFile:    filepath.Join(homedir, ".ssh", "known_hosts"),
-		HostKeyAlgorithms: hostKeyTypes,
+		SSHConfigFile:            filepath.Join(homedir, ".ssh", "config"),
+		KnownHostsFile:           filepath.Join(homedir, ".ssh", "known_hosts"),
+		ConnectionTimeoutSeconds: 15,
+		KeepAliveIntervalSeconds: 30,
+		KeepAliveMaxCount:        3,
+		HostKeyAlgorithms:        hostKeyTypes,
 	}, nil
 }
 
@@ -88,10 +91,13 @@ func SaveConfig(path string, cfg Config) error {
 }
 
 type Config struct {
-	SSHConfigFile     string       `json:"sshConfigFile"`
-	KnownHostsFile    string       `json:"knownHostsFile"`
-	HostKeyAlgorithms []string     `json:"hostKeyAlgorithms"`
-	Connections       []Connection `json:"connections"`
+	SSHConfigFile            string       `json:"sshConfigFile"`
+	KnownHostsFile           string       `json:"knownHostsFile"`
+	ConnectionTimeoutSeconds int          `json:"connectionTimeoutSeconds"`
+	KeepAliveIntervalSeconds int          `json:"keepAliveIntervalSeconds"`
+	KeepAliveMaxCount        int          `json:"keepAliveMaxCount"`
+	HostKeyAlgorithms        []string     `json:"hostKeyAlgorithms"`
+	Connections              []Connection `json:"connections"`
 }
 
 type Connection struct {
